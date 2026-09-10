@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from sqlmodel import Session, select
 
 from app.memory.delta import DeltaResult, detect_delta
+from app.memory.engine import process_memory_delta
 from app.memory.ids import NormalizedMessage
 from app.memory.isolation import derive_isolation_keys
 from app.storage.db import session_scope
@@ -114,7 +115,15 @@ def archive_request(
             )
             if delta.new_messages:
                 _persist_new_messages(session, conversation_id, delta.new_messages)
-            return delta
+        # Deterministic memory update after archive commit (fail-open).
+        if delta.has_new:
+            try:
+                process_memory_delta(delta)
+            except Exception:
+                logger.exception(
+                    "memory update failed after archive; continuing to main AI"
+                )
+        return delta
     except Exception:
         logger.exception("raw archive failed; continuing without memory delta")
         return None

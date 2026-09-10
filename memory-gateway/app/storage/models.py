@@ -44,7 +44,7 @@ class Message(SQLModel, table=True):
 
 
 class MemoryItem(SQLModel, table=True):
-    """Canonical compact memory (schema landed in Phase 2; engine fills in Phase 3)."""
+    """Canonical compact memory item with separate score axes."""
 
     __tablename__ = "memory_items"
 
@@ -52,6 +52,7 @@ class MemoryItem(SQLModel, table=True):
     conversation_id: str = Field(foreign_key="conversations.id", index=True, max_length=128)
     content: str = Field(sa_column=Column(Text, nullable=False))
     type: str = Field(max_length=64, index=True)
+    topic_key: str = Field(default="", max_length=128, index=True)
     confidence: float = Field(default=0.0)
     importance: float = Field(default=0.0)
     stability: float = Field(default=0.0)

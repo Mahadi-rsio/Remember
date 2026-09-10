@@ -33,15 +33,15 @@ Track work against `PROMT.md`. Check items as they land.
 
 ## Phase 3 — Memory Engine (Deterministic)
 
-- [ ] Canonical memory schema (facts, decisions, constraints, preferences, goals, architecture, important_events, active_tasks)
-- [ ] Per-item scores: confidence, importance, stability, freshness, information_gain
-- [ ] Deterministic low-info message skip (`ok`, `thanks`, `yes`, `continue`, …)
-- [ ] Duplicate / merge detection
-- [ ] Contradiction handling with supersede (status transitions)
-- [ ] Explicit user decision authority vs speculation
-- [ ] Information-gain gate before writes
-- [ ] Versioned context state on each update
-- [ ] Tests: extract, merge, supersede, confidence preserve, low-info skip
+- [x] Canonical memory schema (facts, decisions, constraints, preferences, goals, architecture, important_events, active_tasks)
+- [x] Per-item scores: confidence, importance, stability, freshness, information_gain
+- [x] Deterministic low-info message skip (`ok`, `thanks`, `yes`, `continue`, …)
+- [x] Duplicate / merge detection
+- [x] Contradiction handling with supersede (status transitions)
+- [x] Explicit user decision authority vs speculation
+- [x] Information-gain gate before writes
+- [x] Versioned context state on each update
+- [x] Tests: extract, merge, supersede, confidence preserve, low-info skip
 
 ## Phase 4 — Memory AI (Optional)
 
