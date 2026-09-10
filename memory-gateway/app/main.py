@@ -9,6 +9,7 @@ from app.api.health import router as health_router
 from app.api.proxy import router as proxy_router
 from app.config import get_settings
 from app.providers import create_upstream_provider
+from app.storage.db import init_db
 
 
 @asynccontextmanager
@@ -16,6 +17,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     db_path = Path(settings.sqlite_path).expanduser()
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    init_db(str(db_path))
 
     provider = create_upstream_provider(settings)
     app.state.upstream_provider = provider

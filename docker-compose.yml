@@ -1,12 +1,14 @@
+# Run from repo root: docker compose up --build
 services:
   memory-gateway:
-    build: .
+    build:
+      context: ./memory-gateway
     image: memory-gateway:local
     container_name: memory-gateway
     ports:
       - "${PORT:-8000}:8000"
     env_file:
-      - .env
+      - ./memory-gateway/.env
     environment:
       SQLITE_PATH: /app/data/memory.db
       HOST: 0.0.0.0

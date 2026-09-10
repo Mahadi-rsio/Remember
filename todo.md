@@ -24,12 +24,12 @@ Track work against `PROMT.md`. Check items as they land.
 
 ## Phase 2 — Persistence & Delta
 
-- [ ] SQLModel/SQLAlchemy models: conversations, messages, memory items, context versions
-- [ ] Raw archive writer (user / assistant / tool / system + metadata)
-- [ ] Message ID extraction + deterministic hash fallback
-- [ ] Delta detection (duplicates, retries, reorder, missing)
-- [ ] Conversation / user isolation keys
-- [ ] Tests: new delta, duplicate ignore, retry handling
+- [x] SQLModel/SQLAlchemy models: conversations, messages, memory items, context versions
+- [x] Raw archive writer (user / assistant / tool / system + metadata)
+- [x] Message ID extraction + deterministic hash fallback
+- [x] Delta detection (duplicates, retries, reorder, missing)
+- [x] Conversation / user isolation keys
+- [x] Tests: new delta, duplicate ignore, retry handling
 
 ## Phase 3 — Memory Engine (Deterministic)
 

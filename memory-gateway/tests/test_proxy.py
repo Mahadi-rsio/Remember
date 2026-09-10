@@ -106,12 +106,17 @@ def fake_provider() -> FakeProvider:
 
 
 @pytest.fixture
-def client(fake_provider: FakeProvider):
+def client(fake_provider: FakeProvider, tmp_path, monkeypatch):
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "proxy.db"))
     get_settings.cache_clear()
+    from app.storage.db import reset_engine
+
+    reset_engine()
     app = create_app()
     with TestClient(app) as test_client:
         app.state.upstream_provider = fake_provider
         yield test_client, fake_provider
+    reset_engine()
     get_settings.cache_clear()
 
 

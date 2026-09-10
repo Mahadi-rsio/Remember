@@ -1,8 +1,9 @@
-"""OpenAI-compatible transparent proxy routes (Phase 1 — no memory yet)."""
+"""OpenAI-compatible transparent proxy routes (Phase 2: archive + delta, then forward)."""
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -11,8 +12,27 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from app.config import get_settings
 from app.providers.base import AIProvider, ProviderResponse
 from app.providers.openai_compatible import UpstreamError
+from app.storage.archive import archive_request
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["proxy"])
+
+
+def _archive_inbound(request: Request, body: dict[str, Any]) -> None:
+    """Persist raw messages / compute delta. Never raises into the hot path."""
+    try:
+        delta = archive_request(body, headers=request.headers)
+        if delta is not None and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "archive conversation=%s new=%s dup=%s",
+                delta.conversation_id,
+                len(delta.new_messages),
+                len(delta.duplicate_messages),
+            )
+    except Exception:
+        # archive_request already fail-opens; belt-and-suspenders for the route.
+        logger.exception("unexpected archive error")
 
 
 def _get_provider(request: Request) -> AIProvider:
@@ -111,6 +131,8 @@ async def chat_completions(request: Request) -> Response:
     if isinstance(body, JSONResponse):
         return body
 
+    _archive_inbound(request, body)
+
     provider = _get_provider(request)
     if body.get("stream"):
         return await _stream_proxy(provider, "/chat/completions", body)
@@ -127,6 +149,8 @@ async def responses(request: Request) -> Response:
     body = await _read_json_body(request)
     if isinstance(body, JSONResponse):
         return body
+
+    _archive_inbound(request, body)
 
     provider = _get_provider(request)
     if body.get("stream"):
