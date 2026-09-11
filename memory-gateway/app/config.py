@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "info"
 
+    # Trace logging (context sent to AI + response received)
+    log_file: str | None = None
+    log_bodies: bool = True
+    log_payload_max_bytes: int = Field(default=100_000, ge=256)
+
     # Upstream (main AI — mandatory for answers)
     upstream_provider: str = "openai"
     upstream_base_url: str = "https://api.openai.com/v1"

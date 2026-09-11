@@ -77,6 +77,8 @@ Track work against `PROMT.md`. Check items as they land.
 - [ ] API authentication hooks
 - [ ] Rate limiting hooks
 - [ ] Secret redaction; never log API keys; never store upstream keys in raw logs
+- [x] Trace logging: log compiled context sent to AI + response received (stream + non-stream), optional file sink
+- [x] Tiny chat CLI (`cli.py`) for live gateway testing (streaming, sessions, memory recall)
 - [ ] Retention / cleanup config
 - [ ] Safe client error responses
 - [ ] Failure isolation: Memory AI / SQLite / retrieval failures → still call main AI

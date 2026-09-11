@@ -9,6 +9,7 @@ from app.api.health import router as health_router
 from app.api.proxy import router as proxy_router
 from app.cache.redis_adapter import create_cache_backend
 from app.config import get_settings
+from app.logging_setup import setup_logging
 from app.providers import create_memory_ai_adapter, create_upstream_provider
 from app.storage.db import init_db
 
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    setup_logging(settings)
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -13,10 +14,11 @@ from app.config import get_settings
 from app.context.compiler import compile_context
 from app.memory.isolation import derive_isolation_keys
 from app.providers.base import AIProvider, ProviderResponse
-from app.providers.openai_compatible import UpstreamError
+from app.providers.openai_compatible import ProviderStream, UpstreamError
 from app.storage.archive import archive_request, archive_request_async
 
 logger = logging.getLogger(__name__)
+trace_logger = logging.getLogger("gateway.trace")
 
 router = APIRouter(prefix="/v1", tags=["proxy"])
 
@@ -36,6 +38,68 @@ async def _archive_inbound(request: Request, body: dict[str, Any]) -> None:
     except Exception:
         # archive_request already fail-opens; belt-and-suspenders for the route.
         logger.exception("unexpected archive error")
+
+
+def _clip_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n... [truncated {len(text) - limit} chars]"
+
+
+def _log_upstream_context(path: str, body: dict[str, Any]) -> None:
+    """Log the exact context (messages) being sent to the main AI."""
+    settings = get_settings()
+    if not settings.log_bodies or not trace_logger.isEnabledFor(logging.INFO):
+        return
+    messages = body.get("messages")
+    count = len(messages) if isinstance(messages, list) else 0
+    payload = (
+        json.dumps(messages, ensure_ascii=False, indent=2, default=str)
+        if isinstance(messages, list)
+        else "<no messages field>"
+    )
+    trace_logger.info(
+        "=== CONTEXT -> AI path=%s model=%s messages=%d\n%s",
+        path,
+        body.get("model"),
+        count,
+        _clip_text(payload, settings.log_payload_max_bytes),
+    )
+
+
+def _log_upstream_response(path: str, status_code: int, content: bytes) -> None:
+    """Log the raw response received from the main AI."""
+    settings = get_settings()
+    if not settings.log_bodies or not trace_logger.isEnabledFor(logging.INFO):
+        return
+    trace_logger.info(
+        "=== RESPONSE <- AI path=%s status=%s bytes=%d\n%s",
+        path,
+        status_code,
+        len(content),
+        _clip_text(content.decode("utf-8", "replace"), settings.log_payload_max_bytes),
+    )
+
+
+async def _trace_stream(
+    handle: ProviderStream,
+    path: str,
+) -> AsyncIterator[bytes]:
+    """Pass stream bytes through unchanged; log the full body once done."""
+    chunks: list[bytes] = []
+    try:
+        async for chunk in handle.aiter_bytes():
+            chunks.append(chunk)
+            yield chunk
+    finally:
+        try:
+            _log_upstream_response(path, handle.status_code, b"".join(chunks))
+        except Exception:
+            logger.exception("failed to log streamed response")
+        try:
+            await handle.aclose()
+        except Exception:
+            pass
 
 
 def _get_provider(request: Request) -> AIProvider:
@@ -166,6 +230,7 @@ async def chat_completions(request: Request) -> Response:
 
     await _archive_inbound(request, body)
     upstream_body = await _prepare_upstream_body(request, body)
+    _log_upstream_context("/chat/completions", upstream_body)
 
     provider = _get_provider(request)
     if upstream_body.get("stream"):
@@ -174,7 +239,9 @@ async def chat_completions(request: Request) -> Response:
     try:
         result = await provider.chat(upstream_body)
     except UpstreamError as exc:
+        trace_logger.error("upstream call failed path=/chat/completions: %s", exc)
         return _upstream_unavailable(exc)
+    _log_upstream_response("/chat/completions", result.status_code, result.content)
     return _passthrough_response(result)
 
 
@@ -186,6 +253,7 @@ async def responses(request: Request) -> Response:
 
     await _archive_inbound(request, body)
     upstream_body = await _prepare_upstream_body(request, body)
+    _log_upstream_context("/responses", upstream_body)
 
     provider = _get_provider(request)
     if upstream_body.get("stream"):
@@ -194,7 +262,9 @@ async def responses(request: Request) -> Response:
     try:
         result = await provider.responses(upstream_body)
     except UpstreamError as exc:
+        trace_logger.error("upstream call failed path=/responses: %s", exc)
         return _upstream_unavailable(exc)
+    _log_upstream_response("/responses", result.status_code, result.content)
     return _passthrough_response(result)
 
 
@@ -235,7 +305,7 @@ async def _stream_proxy(
     media = handle.media_type or "text/event-stream"
 
     return StreamingResponse(
-        handle.aiter_bytes(),
+        _trace_stream(handle, path),
         status_code=handle.status_code,
         headers=headers,
         media_type=media,
