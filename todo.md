@@ -118,10 +118,10 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Tests: `temp1234 → REVOKED` after reset; a subsequent query must NOT return `temp1234`
 
 ### 8.5 Improve Conflict Resolution
-- [ ] Conflict selection order: latest valid correction > latest ACTIVE fact > older SUPERSEDED fact
-- [ ] Do not inject both conflicting values into compiled context (unless historical view requested)
-- [ ] Use existing timestamp/version/source metadata
-- [ ] Tests: two competing facts for same entity → only latest ACTIVE wins
+- [x] Conflict selection order: latest valid correction > latest ACTIVE fact > older SUPERSEDED fact
+- [x] Do not inject both conflicting values into compiled context (unless historical view requested)
+- [x] Use existing timestamp/version/source metadata
+- [x] Tests: two competing facts for same entity → only latest ACTIVE wins
 
 ### 8.6 Protect Against False Memories
 - [ ] Ensure existing low-info filter covers: `ok`, `thanks`, `yes`, `no`, `continue`, `sure`, `What?`, `Why?`, `How?`

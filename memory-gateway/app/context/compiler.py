@@ -20,7 +20,7 @@ from app.context.selector import (
 from app.context.tokens import estimate_messages_tokens, estimate_tokens
 from app.memory.compressor import compress_tool_message
 from app.memory.ids import normalize_message
-from app.memory.state import latest_context_version, list_memory_items
+from app.memory.state import latest_context_version, list_memory_items, resolve_active_conflicts
 from app.models.memory import MemoryStatus
 from app.providers.memory_ai import MemoryAIAdapter
 from app.storage.db import session_scope
@@ -124,6 +124,11 @@ async def compile_context(
                         conversation_id,
                         status=MemoryStatus.ACTIVE.value,
                     )
+                    # Conflict resolution (FIX.md §5 / todo 8.5): within the
+                    # ACTIVE set, keep only the latest item per topic so both
+                    # conflicting values are never injected together. Uses
+                    # version/timestamp metadata for a deterministic selection.
+                    canonical_items = resolve_active_conflicts(canonical_items)
             except Exception as exc:
                 logger.warning("Failed loading canonical memory for %s: %s", conversation_id, exc)
 

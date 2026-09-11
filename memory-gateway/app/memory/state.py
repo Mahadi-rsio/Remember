@@ -26,6 +26,35 @@ def list_memory_items(
     return list(session.exec(stmt).all())
 
 
+def resolve_active_conflicts(items: list[MemoryItem]) -> list[MemoryItem]:
+    """Collapse multiple ACTIVE items sharing a topic to the latest one.
+
+    Conflict selection order (FIX.md §5 / todo 8.5): latest valid correction >
+    latest ACTIVE fact > older SUPERSEDED fact. SUPERSEDED/REVOKED items are
+    filtered out before this runs, so only ACTIVE items reach this step. Within
+    the remaining ACTIVE set, at most one item per topic_key survives — the
+    highest `version` (tie-break by `updated_at`). This guarantees both
+    conflicting values are never injected into compiled context together.
+
+    Uses existing version/timestamp metadata for a deterministic, repairable
+    selection. Items without a topic_key are independent and always kept.
+    """
+    by_topic: dict[str, MemoryItem] = {}
+    independent: list[MemoryItem] = []
+    for item in items:
+        topic = (item.topic_key or "").strip()
+        if not topic:
+            independent.append(item)
+            continue
+        existing = by_topic.get(topic)
+        if existing is None:
+            by_topic[topic] = item
+            continue
+        if (item.version, item.updated_at) > (existing.version, existing.updated_at):
+            by_topic[topic] = item
+    return independent + list(by_topic.values())
+
+
 def latest_context_version(session: Session, conversation_id: str) -> int:
     rows = session.exec(
         select(ContextVersion.version).where(
