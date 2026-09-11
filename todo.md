@@ -99,10 +99,10 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Guard: declarative statements containing question-like words must still be stored
 
 ### 8.2 Expand Deterministic Fact Extraction
-- [ ] Pattern: `I am building X.` / `X uses Y.` / `X's Z is …` / `I prefer X over Y.` / `The Y is X.`
-- [ ] Normalize into structured memory (entity, attribute, value)
-- [ ] Keep extraction modular and testable; avoid brittle mega-regex
-- [ ] Tests: cover all new natural-language forms above
+- [x] Pattern: `I am building X.` / `X uses Y.` / `X's Z is …` / `I prefer X over Y.` / `The Y is X.`
+- [x] Normalize into structured memory (entity, attribute, value)
+- [x] Keep extraction modular and testable; avoid brittle mega-regex
+- [x] Tests: cover all new natural-language forms above
 
 ### 8.3 Implement Correction Semantics
 - [ ] Detect correction phrases: `X changed from A to B`, `X now uses Y instead of Z`, `We no longer use X`, `The Y was changed to X`, `Actually, …`, `I changed my preference from X to Y`

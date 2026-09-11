@@ -38,6 +38,38 @@ class MemoryScores(BaseModel):
     information_gain: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class StructuredFact(BaseModel):
+    """Structured representation (entity, attribute, value) of an extracted fact."""
+
+    entity: str
+    attribute: str
+    value: str
+    memory_type: MemoryType = MemoryType.FACT
+    raw_text: str = ""
+
+    def to_content(self) -> str:
+        if self.memory_type == MemoryType.PREFERENCE:
+            return self.value
+        if self.attribute == "project" and self.entity == self.value:
+            return f"Project = {self.value}"
+        if self.entity and self.entity.lower() not in ("user", self.attribute.lower()):
+            return f"{self.entity} {self.attribute} = {self.value}"
+        attr_title = self.attribute[0].upper() + self.attribute[1:] if self.attribute else "Item"
+        return f"{attr_title} = {self.value}"
+
+    def to_topic_key(self) -> str:
+        from app.memory.facts import detect_preference_domain, slugify
+
+        if self.memory_type == MemoryType.PREFERENCE:
+            _, topic = detect_preference_domain(self.value)
+            return topic
+        if self.attribute == "project":
+            return "project"
+        if self.entity and self.entity.lower() not in ("user", self.attribute.lower()):
+            return f"{slugify(self.entity)}_{slugify(self.attribute)}"
+        return slugify(self.attribute)
+
+
 class CandidateMemory(BaseModel):
     """In-memory candidate before persistence / merge."""
 
@@ -48,6 +80,7 @@ class CandidateMemory(BaseModel):
     topic_key: str = ""
     authority: str = "user"  # user | assistant | speculation
     is_correction: bool = False
+    structured_fact: StructuredFact | None = None
 
     @field_validator("content")
     @classmethod

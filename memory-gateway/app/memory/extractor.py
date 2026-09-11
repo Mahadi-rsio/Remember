@@ -5,11 +5,12 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+from app.memory.facts import detect_preference_domain, extract_structured_fact
 from app.memory.ids import NormalizedMessage
 from app.memory.interrogative import is_interrogative
 from app.memory.low_info import is_low_info_message
 from app.memory.scorer import looks_like_correction, looks_speculative, score_candidate
-from app.models.memory import CandidateMemory, MemoryType
+from app.models.memory import CandidateMemory, MemoryType, StructuredFact
 
 # Explicit typed prefixes: "decision: …", "[fact] …"
 _PREFIX_RE = re.compile(
@@ -83,6 +84,10 @@ _ARCH_RE = re.compile(
 
 def topic_key_from_content(content: str, memory_type: MemoryType | None = None) -> str:
     """Stable topic key used for duplicate / contradiction matching."""
+    if memory_type == MemoryType.PREFERENCE:
+        _, pref_topic = detect_preference_domain(content)
+        return pref_topic
+
     kv = _KV_RE.match(content.strip())
     if kv:
         return _slug(kv.group("key"))
@@ -145,15 +150,21 @@ def _parse_prefix(content: str) -> tuple[MemoryType | None, str]:
     return _LABEL_TO_TYPE.get(label), body
 
 
-def _classify(content: str) -> tuple[MemoryType, str] | None:
+def _classify(content: str) -> tuple[MemoryType, str, StructuredFact | None] | None:
     typed, body = _parse_prefix(content)
     if typed is not None and body:
         if is_interrogative(body):
             return None
-        return typed, body
+        sfact = extract_structured_fact(body)
+        return typed, body, sfact
 
     if is_interrogative(content):
         return None
+
+    # Check modular natural-language structured fact extraction
+    sfact = extract_structured_fact(content)
+    if sfact is not None:
+        return sfact.memory_type, sfact.to_content(), sfact
 
     text = content.strip()
     for pattern, mtype in (
@@ -172,7 +183,7 @@ def _classify(content: str) -> tuple[MemoryType, str] | None:
                 # Normalize decision body to a compact statement
                 body = f"Use {body}" if not body.lower().startswith("use ") else body
                 body = body[0].upper() + body[1:] if body else body
-            return mtype, body
+            return mtype, body, None
 
     kv = _KV_RE.match(text)
     if kv:
@@ -182,8 +193,8 @@ def _classify(content: str) -> tuple[MemoryType, str] | None:
             return None
         # Prefer decision when phrasing looks decisive
         if re.search(r"\b(database|db|provider|stack|hosting)\b", key, re.I):
-            return MemoryType.DECISION, f"{key} = {value}"
-        return MemoryType.FACT, f"{key} = {value}"
+            return MemoryType.DECISION, f"{key} = {value}", None
+        return MemoryType.FACT, f"{key} = {value}", None
 
     return None
 
@@ -196,30 +207,33 @@ def extract_from_message(message: NormalizedMessage) -> list[CandidateMemory]:
         return []
     if is_interrogative(message.content):
         return []
-    # Assistant turns only yield memory when explicitly typed or clearly structured
+
     classified = _classify(message.content)
     if classified is None:
-        if message.role != "user":
-            return []
-        # Bare user prose without patterns → skip (Memory AI may handle later)
         return []
 
-    mtype, body = classified
-    if message.role == "assistant" and mtype == MemoryType.DECISION:
-        # Assistant-proposed decisions stay speculative unless prefixed as fact dump
-        pass
+    mtype, body, sfact = classified
+    if message.role == "assistant":
+        # Assistant natural-language statements must never become user memories.
+        # Only explicitly typed prefixes (e.g. [fact]...) are accepted.
+        typed, _ = _parse_prefix(message.content)
+        if typed is None:
+            return []
 
     authority = _authority_for_role(message.role, message.content)
     if message.role == "assistant" and mtype in (MemoryType.DECISION, MemoryType.CONSTRAINT):
         authority = "speculation"
 
+    topic_key = sfact.to_topic_key() if sfact is not None else topic_key_from_content(body, mtype)
+
     candidate = CandidateMemory(
         content=body,
         type=mtype,
         source_message_ids=[message.message_key],
-        topic_key=topic_key_from_content(body, mtype),
+        topic_key=topic_key,
         authority=authority,
         is_correction=looks_like_correction(message.content),
+        structured_fact=sfact,
     )
     candidate.scores = score_candidate(candidate)
     return [candidate]
