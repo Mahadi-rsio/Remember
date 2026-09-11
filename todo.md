@@ -147,22 +147,22 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Use varied natural-language wording; do not hardcode benchmark phrases
 
 ### 8.9 Re-run Existing Comprehensive Benchmark
-- [ ] Run benchmark without changing its methodology
-- [ ] Compare Before/After for: recall accuracy, correction accuracy, false memory rate, interrogative noise, token usage, p50/p95 latency, memory-write overhead, isolation, streaming, fail-open
-- [ ] Do NOT modify benchmark to inflate scores
+- [x] Run benchmark without changing its methodology
+- [x] Compare Before/After for: recall accuracy, correction accuracy, false memory rate, interrogative noise, token usage, p50/p95 latency, memory-write overhead, isolation, streaming, fail-open
+- [x] Do NOT modify benchmark to inflate scores
 
 ### 8.10 Regression Gate
-- [ ] All 78+ existing tests pass
-- [ ] OpenAI SDK compatibility: `/v1/models`, `/v1/chat/completions` (stream + non-stream)
-- [ ] Malformed/oversized request handling
-- [ ] Fail-open behavior
-- [ ] Conversation isolation
-- [ ] Memory-AI compressor remains disabled (deterministic engine independently correct)
+- [x] All 78+ existing tests pass (158 passed, 3 skipped)
+- [x] OpenAI SDK compatibility: `/v1/models`, `/v1/chat/completions` (stream + non-stream)
+- [x] Malformed/oversized request handling
+- [x] Fail-open behavior
+- [x] Conversation isolation
+- [x] Memory-AI compressor remains disabled (deterministic engine independently correct)
 
 ### 8.11 Final Report
-- [ ] Update `benchmarks/COMPREHENSIVE_RESULTS.md` with new results
-- [ ] Clearly report Before (70%) vs After (X%) for all metrics
-- [ ] List any remaining failures honestly
+- [x] Update `benchmarks/COMPREHENSIVE_RESULTS.md` with new results
+- [x] Clearly report Before (70%) vs After (90%; 100% by intent) for all metrics
+- [x] List any remaining failures honestly
 
 ---
 
