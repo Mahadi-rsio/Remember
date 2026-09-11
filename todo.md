@@ -129,22 +129,22 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Tests: all items above → no memory extraction
 
 ### 8.7 Update Context Compilation
-- [ ] Compiled context must contain only ACTIVE / latest-correction memories
-- [ ] After correction: only new value appears; old value absent as active fact
-- [ ] After revocation: no entry for the revoked item in compiled context
-- [ ] Do not increase `CONTEXT_BUDGET` to hide correctness problems
-- [ ] Tests: correction → compiled context has new value only; revocation → no entry
+- [x] Compiled context must contain only ACTIVE / latest-correction memories
+- [x] After correction: only new value appears; old value absent as active fact
+- [x] After revocation: no entry for the revoked item in compiled context
+- [x] Do not increase `CONTEXT_BUDGET` to hide correctness problems
+- [x] Tests: correction → compiled context has new value only; revocation → no entry
 
 ### 8.8 Add Comprehensive Regression Tests
-- [ ] Basic facts: `I am building Cloudisy.`, `Cloudisy uses PostgreSQL.`, `I prefer TypeScript.`
-- [ ] Corrections: `Cloudisy uses Neon.` → `Actually, Cloudisy uses self-hosted PostgreSQL.`
-- [ ] Revocation: `The temporary password is temp1234.` → `The password was reset.`
-- [ ] Questions: `What is my name?`, `What database do we use?` → no memory stored
-- [ ] Contradictions: `I prefer React.` → `Actually, I prefer Vue.`
-- [ ] Stale information: old fact + later update → only current value compiled
-- [ ] Unrelated memories: not injected into unrelated context
-- [ ] Isolation: memories from conversation A never appear in conversation B
-- [ ] Use varied natural-language wording; do not hardcode benchmark phrases
+- [x] Basic facts: `I am building Cloudisy.`, `Cloudisy uses PostgreSQL.`, `I prefer TypeScript.`
+- [x] Corrections: `Cloudisy uses Neon.` → `Actually, Cloudisy uses self-hosted PostgreSQL.`
+- [x] Revocation: `The temporary password is temp1234.` → `The password was reset.`
+- [x] Questions: `What is my name?`, `What database do we use?` → no memory stored
+- [x] Contradictions: `I prefer React.` → `Actually, I prefer Vue.`
+- [x] Stale information: old fact + later update → only current value compiled
+- [x] Unrelated memories: not injected into unrelated context
+- [x] Isolation: memories from conversation A never appear in conversation B
+- [x] Use varied natural-language wording; do not hardcode benchmark phrases
 
 ### 8.9 Re-run Existing Comprehensive Benchmark
 - [ ] Run benchmark without changing its methodology
