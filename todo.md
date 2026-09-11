@@ -81,7 +81,8 @@ Track work against `PROMT.md`. Check items as they land.
 - [ ] Safe client error responses
 - [ ] Failure isolation: Memory AI / SQLite / retrieval failures → still call main AI
 - [ ] Response transparency tests: upstream == gateway (stream + non-stream)
-- [ ] README: install, env, OpenCode, Codex, OpenAI clients, providers, budget, streaming, troubleshooting, security
+- [x] README: install, env, OpenCode, Codex, OpenAI clients, providers, budget, streaming, troubleshooting, security
+- [x] Live benchmark (`benchmarks/bench.py`): proxy overhead, TTFT, memory-write cost, compaction
 - [ ] End-to-end smoke with `docker compose up`
 
 ## Explicit Non-Goals (Do Not Do in MVP)
