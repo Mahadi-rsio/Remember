@@ -112,10 +112,10 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Tests: Cloudisy Neon → self-hosted PostgreSQL correction path
 
 ### 8.4 Implement Revocation / Reset Semantics
-- [ ] Detect revocation phrases: `was reset`, `ignore the previous`, `no longer valid`, `has been revoked`, `forget the previous value`
-- [ ] Memory state model: `ACTIVE | SUPERSEDED | REVOKED | EXPIRED`
-- [ ] Revoked items: kept in archive but excluded from compiled context
-- [ ] Tests: `temp1234 → REVOKED` after reset; a subsequent query must NOT return `temp1234`
+- [x] Detect revocation phrases: `was reset`, `ignore the previous`, `no longer valid`, `has been revoked`, `forget the previous value`
+- [x] Memory state model: `ACTIVE | SUPERSEDED | REVOKED | EXPIRED`
+- [x] Revoked items: kept in archive but excluded from compiled context
+- [x] Tests: `temp1234 → REVOKED` after reset; a subsequent query must NOT return `temp1234`
 
 ### 8.5 Improve Conflict Resolution
 - [ ] Conflict selection order: latest valid correction > latest ACTIVE fact > older SUPERSEDED fact

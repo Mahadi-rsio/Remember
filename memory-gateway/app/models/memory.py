@@ -8,6 +8,7 @@ from typing import Sequence
 from pydantic import BaseModel, Field, field_validator
 
 from app.memory.correction import Correction
+from app.memory.revocation import Revocation
 
 
 class MemoryType(str, Enum):
@@ -27,6 +28,8 @@ CANONICAL_TYPES: tuple[MemoryType, ...] = tuple(MemoryType)
 class MemoryStatus(str, Enum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
     OBSOLETE = "obsolete"
 
 
@@ -84,6 +87,7 @@ class CandidateMemory(BaseModel):
     is_correction: bool = False
     structured_fact: StructuredFact | None = None
     correction: "Correction | None" = None
+    revocation: "Revocation | None" = None
 
     @field_validator("content")
     @classmethod

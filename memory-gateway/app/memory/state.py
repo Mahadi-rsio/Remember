@@ -73,6 +73,11 @@ def persist_candidates(
         elif result.action == "merge" and result.item is not None:
             # active list already holds same object
             pass
+        elif result.action == "revoke" and result.revoked:
+            # Remove revoked items from the working set so later candidates in
+            # this batch do not treat them as active.
+            revoked_ids = {id(i) for i in result.revoked}
+            active = [i for i in active if id(i) not in revoked_ids]
         session.flush()
     return results
 
@@ -125,4 +130,4 @@ def mark_items_obsolete(
 
 
 def memory_changed(results: list[ApplyResult], *, obsolete_count: int = 0) -> bool:
-    return any(r.action in ("create", "merge", "supersede") for r in results) or obsolete_count > 0
+    return any(r.action in ("create", "merge", "supersede", "revoke") for r in results) or obsolete_count > 0

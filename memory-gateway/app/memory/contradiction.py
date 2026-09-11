@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -13,7 +14,7 @@ from app.memory.scorer import content_similarity, should_write_new_item
 from app.models.memory import CandidateMemory, MemoryStatus, MemoryType
 from app.storage.models import MemoryItem, utcnow
 
-ActionKind = Literal["skip", "merge", "create", "supersede", "reject"]
+ActionKind = Literal["skip", "merge", "create", "supersede", "reject", "revoke"]
 
 
 @dataclass
@@ -23,6 +24,7 @@ class ApplyResult:
     superseded: MemoryItem | None = None
     reason: str = ""
     correction: Correction | None = None
+    revoked: list[MemoryItem] | None = None
 
 
 def _parse_source_ids(raw: str) -> list[str]:
@@ -171,6 +173,48 @@ def supersede_item(
     return new_item, existing
 
 
+def _find_revocation_targets(
+    candidate: CandidateMemory,
+    active: list[MemoryItem],
+) -> list[MemoryItem]:
+    """Find active items matching a revocation by value and/or target keyword."""
+    if candidate.revocation is None:
+        return []
+    value = (candidate.revocation.value or "").casefold().strip()
+    target = (candidate.revocation.target or "").casefold().strip()
+    target_tokens = set(re.findall(r"[a-z0-9]+", target))
+
+    matches: list[MemoryItem] = []
+    for item in active:
+        content = item.content.casefold()
+        topic = (item.topic_key or "").casefold()
+        if value and value in content:
+            matches.append(item)
+            continue
+        if target_tokens:
+            content_tokens = set(re.findall(r"[a-z0-9]+", content))
+            topic_tokens = set(re.findall(r"[a-z0-9]+", topic))
+            if target_tokens & content_tokens or target_tokens & topic_tokens:
+                matches.append(item)
+    return matches
+
+
+def revoke_items(
+    session: Session,
+    targets: list[MemoryItem],
+    conversation_id: str,
+) -> list[MemoryItem]:
+    """Mark the given active items as REVOKED (kept in archive, excluded from context)."""
+    revoked: list[MemoryItem] = []
+    for item in targets:
+        if item.status == MemoryStatus.ACTIVE.value:
+            item.status = MemoryStatus.REVOKED.value
+            item.updated_at = utcnow()
+            session.add(item)
+            revoked.append(item)
+    return revoked
+
+
 def apply_candidate(
     session: Session,
     conversation_id: str,
@@ -189,6 +233,19 @@ def apply_candidate(
     from app.memory.scorer import score_candidate
 
     candidate.scores = score_candidate(candidate, existing_contents=same_type_contents)
+
+    # Explicit revocation: mark matching active items REVOKED (todo 8.4). A
+    # revocation never creates a new memory row; it only invalidates prior ones.
+    if candidate.revocation is not None:
+        targets = _find_revocation_targets(candidate, active)
+        if targets:
+            revoked = revoke_items(session, targets, conversation_id)
+            return ApplyResult(
+                action="revoke",
+                reason="revocation",
+                revoked=revoked,
+            )
+        return ApplyResult(action="skip", reason="no_revocation_target")
 
     # Explicit correction: supersede the active item that holds the old value.
     if candidate.correction is not None:

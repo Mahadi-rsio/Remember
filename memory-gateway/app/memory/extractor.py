@@ -10,6 +10,7 @@ from app.memory.facts import detect_preference_domain, extract_structured_fact, 
 from app.memory.ids import NormalizedMessage
 from app.memory.interrogative import is_interrogative
 from app.memory.low_info import is_low_info_message
+from app.memory.revocation import parse_revocation
 from app.memory.scorer import looks_like_correction, looks_speculative, score_candidate
 from app.models.memory import CandidateMemory, MemoryType, StructuredFact
 
@@ -215,6 +216,13 @@ def extract_from_message(message: NormalizedMessage) -> list[CandidateMemory]:
     if is_interrogative(stripped):
         return []
 
+    # Revocation / reset semantics (FIX.md §4 / todo 8.4): these statements
+    # invalidate a previously stored fact rather than creating a new one.
+    revocation = parse_revocation(stripped)
+    if revocation is not None:
+        candidate = _build_revocation_candidate(message, revocation)
+        return [candidate] if candidate is not None else []
+
     # Try structured correction phrases: "X changed from A to B", "X now uses B
     # instead of A", "The Y was changed to B", "I changed my preference from A to B".
     correction = parse_correction(stripped)
@@ -328,6 +336,29 @@ def _build_correction_candidate(
         is_correction=True,
         structured_fact=sfact,
         correction=correction,
+    )
+    candidate.scores = score_candidate(candidate)
+    return candidate
+
+
+def _build_revocation_candidate(
+    message: NormalizedMessage,
+    revocation: "object",
+) -> CandidateMemory | None:
+    """Build a CandidateMemory that marks a prior fact as revoked (todo 8.4)."""
+    if message.role not in ("user",):
+        return None
+    from app.memory.revocation import Revocation
+
+    if not isinstance(revocation, Revocation):
+        return None
+    candidate = CandidateMemory(
+        content=f"REVOKE: {revocation.target}",
+        type=MemoryType.FACT,
+        source_message_ids=[message.message_key],
+        topic_key="__revocation__",
+        authority="user",
+        revocation=revocation,
     )
     candidate.scores = score_candidate(candidate)
     return candidate
