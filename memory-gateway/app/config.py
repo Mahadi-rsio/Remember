@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Gateway security hooks (Phase 7)
     gateway_api_key: str | None = None
     max_request_bytes: int = Field(default=2_000_000, ge=1024)
+    rate_limit_rpm: int = Field(default=0, ge=0)  # 0 = disabled
+
+    # Retention / cleanup (Phase 7)
+    retention_days: int = Field(default=0, ge=0)  # 0 = keep forever
 
 
 @lru_cache

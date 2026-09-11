@@ -42,6 +42,7 @@ Do **not** re-read all docs every turn; load only what the task needs.
 | 5 | Fixed-budget context compiler | Context ≤ `CONTEXT_BUDGET` |
 | 6 | FTS retrieval + versioned cache | FTS works; stale cache impossible |
 | 7 | Security, failure isolation, README | DoD checklist in `todo.md` complete |
+| 8 | **Memory correctness** (FIX.md) — interrogative noise, correction/revocation semantics, false-memory protection, conflict resolution, updated compiler, regression tests, benchmark re-run | correctness ≥95%, correction accuracy ≥95%, false-memory ~0%, 78+ tests pass |
 
 Work the **lowest incomplete phase**. Only touch a later phase if the user explicitly asks or a blocker requires a thin stub.
 
@@ -78,6 +79,11 @@ Optional: run `python .agents/skills/memory-gateway/scripts/progress.py` for a c
 | Memory AI parse fail? | Retry once if configured; keep prior memory |
 | Contradiction? | Supersede; don't wipe history; user decisions win |
 | Client API docs? | `api.md` |
+| Is a message a question? | Yes → skip extraction entirely (Phase 8 classifier) |
+| Correction detected? | Store `{type:correction, target, old_value, new_value}`; set old fact → SUPERSEDED |
+| Revocation detected? | Set memory item → REVOKED; keep in archive; exclude from compiled context |
+| Conflict in compiled context? | Latest correction > latest ACTIVE > SUPERSEDED; never inject both |
+| Memory-AI compressor in Phase 8? | Keep disabled; deterministic engine must be independently correct |
 
 ## Extra reference
 

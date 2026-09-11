@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api.health import router as health_router
 from app.api.proxy import router as proxy_router
+from app.background import start_retention_scheduler, stop_retention_scheduler
 from app.cache.redis_adapter import create_cache_backend
 from app.config import get_settings
 from app.logging_setup import setup_logging
@@ -29,9 +30,13 @@ async def lifespan(app: FastAPI):
     cache = create_cache_backend(settings.redis_url)
     app.state.cache = cache
 
+    # Phase 7: start retention cleanup scheduler (no-op if retention_days=0)
+    start_retention_scheduler(settings.retention_days)
+
     try:
         yield
     finally:
+        stop_retention_scheduler()
         if memory_ai is not None:
             await memory_ai.aclose()
         await provider.aclose()

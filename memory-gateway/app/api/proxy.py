@@ -1,4 +1,11 @@
-"""OpenAI-compatible transparent proxy routes (Phase 2: archive + delta, then forward)."""
+"""OpenAI-compatible transparent proxy routes (Phase 2: archive + delta, then forward).
+
+Phase 7 additions:
+- Auth dependency (require_api_key) on all /v1/* routes
+- Rate-limit dependency (check_rate_limit) on all /v1/* routes
+- Safe 500 catch-all in chat_completions() and responses()
+- Strengthened failure isolation for archive / context preparation
+"""
 
 from __future__ import annotations
 
@@ -7,9 +14,11 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from app.api.auth import require_api_key
+from app.api.rate_limit import check_rate_limit
 from app.config import get_settings
 from app.context.compiler import compile_context
 from app.memory.isolation import derive_isolation_keys
@@ -21,6 +30,11 @@ logger = logging.getLogger(__name__)
 trace_logger = logging.getLogger("gateway.trace")
 
 router = APIRouter(prefix="/v1", tags=["proxy"])
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 async def _archive_inbound(request: Request, body: dict[str, Any]) -> None:
@@ -149,6 +163,20 @@ def _upstream_unavailable(_exc: UpstreamError) -> JSONResponse:
     )
 
 
+def _internal_error() -> JSONResponse:
+    """Return a safe 500 response that never leaks tracebacks or secrets."""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "message": "Internal gateway error",
+                "type": "gateway_error",
+                "code": "internal_error",
+            }
+        },
+    )
+
+
 async def _read_json_body(request: Request) -> dict[str, Any] | JSONResponse:
     settings = get_settings()
     content_length = request.headers.get("content-length")
@@ -193,6 +221,11 @@ def _passthrough_response(result: ProviderResponse) -> Response:
 
 
 async def _prepare_upstream_body(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    """Compile context; fall back to original body on ANY failure.
+
+    Failure isolation: Memory AI / SQLite / retrieval failures must never
+    prevent the main AI from being called.
+    """
     messages = body.get("messages")
     if not isinstance(messages, list):
         return body
@@ -222,54 +255,99 @@ async def _prepare_upstream_body(request: Request, body: dict[str, Any]) -> dict
         return body
 
 
+# ---------------------------------------------------------------------------
+# Auth + rate-limit dependency helpers
+# ---------------------------------------------------------------------------
+
+
+async def _check_auth(request: Request) -> JSONResponse | None:
+    """Thin wrapper so tests can monkeypatch require_api_key."""
+    return await require_api_key(request)
+
+
+async def _check_rate_limit(request: Request) -> JSONResponse | None:
+    """Thin wrapper so tests can monkeypatch check_rate_limit."""
+    return await check_rate_limit(request)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
 @router.post("/chat/completions")
 async def chat_completions(request: Request) -> Response:
-    body = await _read_json_body(request)
-    if isinstance(body, JSONResponse):
-        return body
-
-    await _archive_inbound(request, body)
-    upstream_body = await _prepare_upstream_body(request, body)
-    _log_upstream_context("/chat/completions", upstream_body)
-
-    provider = _get_provider(request)
-    if upstream_body.get("stream"):
-        return await _stream_proxy(provider, "/chat/completions", upstream_body)
-
     try:
-        result = await provider.chat(upstream_body)
-    except UpstreamError as exc:
-        trace_logger.error("upstream call failed path=/chat/completions: %s", exc)
-        return _upstream_unavailable(exc)
-    _log_upstream_response("/chat/completions", result.status_code, result.content)
-    return _passthrough_response(result)
+        auth_resp = await _check_auth(request)
+        if auth_resp is not None:
+            return auth_resp
+        rl_resp = await _check_rate_limit(request)
+        if rl_resp is not None:
+            return rl_resp
+
+        body = await _read_json_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+
+        await _archive_inbound(request, body)
+        upstream_body = await _prepare_upstream_body(request, body)
+        _log_upstream_context("/chat/completions", upstream_body)
+
+        provider = _get_provider(request)
+        if upstream_body.get("stream"):
+            return await _stream_proxy(provider, "/chat/completions", upstream_body)
+
+        try:
+            result = await provider.chat(upstream_body)
+        except UpstreamError as exc:
+            trace_logger.error("upstream call failed path=/chat/completions: %s", exc)
+            return _upstream_unavailable(exc)
+        _log_upstream_response("/chat/completions", result.status_code, result.content)
+        return _passthrough_response(result)
+    except Exception:
+        logger.exception("unhandled exception in chat_completions")
+        return _internal_error()
 
 
 @router.post("/responses")
 async def responses(request: Request) -> Response:
-    body = await _read_json_body(request)
-    if isinstance(body, JSONResponse):
-        return body
-
-    await _archive_inbound(request, body)
-    upstream_body = await _prepare_upstream_body(request, body)
-    _log_upstream_context("/responses", upstream_body)
-
-    provider = _get_provider(request)
-    if upstream_body.get("stream"):
-        return await _stream_proxy(provider, "/responses", upstream_body)
-
     try:
-        result = await provider.responses(upstream_body)
-    except UpstreamError as exc:
-        trace_logger.error("upstream call failed path=/responses: %s", exc)
-        return _upstream_unavailable(exc)
-    _log_upstream_response("/responses", result.status_code, result.content)
-    return _passthrough_response(result)
+        auth_resp = await _check_auth(request)
+        if auth_resp is not None:
+            return auth_resp
+        rl_resp = await _check_rate_limit(request)
+        if rl_resp is not None:
+            return rl_resp
+
+        body = await _read_json_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+
+        await _archive_inbound(request, body)
+        upstream_body = await _prepare_upstream_body(request, body)
+        _log_upstream_context("/responses", upstream_body)
+
+        provider = _get_provider(request)
+        if upstream_body.get("stream"):
+            return await _stream_proxy(provider, "/responses", upstream_body)
+
+        try:
+            result = await provider.responses(upstream_body)
+        except UpstreamError as exc:
+            trace_logger.error("upstream call failed path=/responses: %s", exc)
+            return _upstream_unavailable(exc)
+        _log_upstream_response("/responses", result.status_code, result.content)
+        return _passthrough_response(result)
+    except Exception:
+        logger.exception("unhandled exception in responses")
+        return _internal_error()
 
 
 @router.get("/models")
 async def models(request: Request) -> Response:
+    auth_resp = await _check_auth(request)
+    if auth_resp is not None:
+        return auth_resp
     provider = _get_provider(request)
     try:
         result = await provider.models()

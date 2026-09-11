@@ -1,4 +1,4 @@
-"""Background job hooks for embeddings, consolidation, and repair.
+"""Background job hooks for embeddings, consolidation, repair, and cleanup.
 
 All jobs are fire-and-forget coroutines. They must:
 - Never raise out (fail-open).
@@ -7,6 +7,7 @@ All jobs are fire-and-forget coroutines. They must:
 
 Phase 6 implementation: stubs wired to asyncio hooks. Actual logic
 (embedding generation, consolidation) is a future extension.
+Phase 7 additions: retention cleanup on startup + daily recurring task.
 """
 from __future__ import annotations
 
@@ -14,6 +15,9 @@ import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Handle for the daily retention task so it can be cancelled cleanly.
+_retention_task: asyncio.Task | None = None
 
 
 async def run_embedding_job(conversation_id: str) -> None:
@@ -54,6 +58,52 @@ async def run_repair_job(conversation_id: str) -> None:
         await asyncio.sleep(0)
     except Exception:
         logger.exception("[background] repair job failed conv=%s", conversation_id)
+
+
+async def _run_retention_async(retention_days: int) -> None:
+    """Async wrapper: run retention cleanup without blocking the event loop."""
+    try:
+        from app.storage.cleanup import run_retention_cleanup
+
+        await asyncio.get_event_loop().run_in_executor(
+            None, run_retention_cleanup, None, retention_days
+        )
+    except Exception:
+        logger.exception("[background] retention cleanup failed")
+
+
+async def _daily_retention_loop(retention_days: int) -> None:
+    """Run retention cleanup once immediately, then every 24 hours."""
+    while True:
+        await _run_retention_async(retention_days)
+        await asyncio.sleep(86_400)  # 24 hours
+
+
+def start_retention_scheduler(retention_days: int) -> None:
+    """Schedule the daily retention cleanup task.
+
+    Call once from app lifespan after the database is ready.
+    No-op when retention_days == 0 (keep-forever mode).
+    """
+    global _retention_task
+    if retention_days <= 0:
+        logger.debug("[background] retention disabled (retention_days=0)")
+        return
+    try:
+        loop = asyncio.get_event_loop()
+        _retention_task = loop.create_task(_daily_retention_loop(retention_days))
+        logger.info("[background] retention scheduler started (retention_days=%d)", retention_days)
+    except RuntimeError:
+        logger.debug("[background] no event loop; skipping retention scheduler")
+
+
+def stop_retention_scheduler() -> None:
+    """Cancel the daily retention task on shutdown."""
+    global _retention_task
+    if _retention_task is not None and not _retention_task.done():
+        _retention_task.cancel()
+        logger.debug("[background] retention scheduler stopped")
+    _retention_task = None
 
 
 def schedule_background_jobs(conversation_id: str) -> None:

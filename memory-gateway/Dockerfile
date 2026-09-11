@@ -13,8 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-RUN mkdir -p /app/data && useradd --create-home --uid 10001 gateway \
-    && chown -R gateway:gateway /app/data
+RUN mkdir -p /app/data /app/logs && useradd --create-home --uid 10001 gateway \
+    && chown -R gateway:gateway /app/data /app/logs
 
 USER gateway
 

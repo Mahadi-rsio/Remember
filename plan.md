@@ -104,6 +104,43 @@ Build a production-oriented **AI Memory Gateway / Context Compression Proxy** in
 
 **Exit criteria:** production-oriented MVP checklist from PROMT § Final Implementation Requirement is met.
 
+### Phase 8 — Memory Correctness (Post-MVP, FIX.md)
+
+**Context:** The comprehensive benchmark (2026-09-11) shows the gateway is sound in isolation, streaming, token reduction (~92%), and fail-open behavior — but memory correctness is only 70% with correction accuracy failing and false/noisy memories present.
+
+**Goal:** Fix the deterministic memory engine so it correctly handles natural-language facts, corrections, revocations, interrogative noise, stale memory, and contradictions. Do **not** redesign the proxy, storage, streaming, or fail-open architecture. Keep Memory-AI compressor disabled for this phase.
+
+**Targets:**
+- Memory correctness ≥ 95%
+- Correction accuracy ≥ 95%
+- False-memory rate ≈ 0%
+- Interrogative noise = 0%
+- Cross-conversation leakage = 0%
+
+**Tasks (see `todo.md` §Phase 8):**
+1. Fix interrogative noise — classify questions before they can become memories.
+2. Expand deterministic extraction — `I am building X`, `X uses Y`, `X's Z is …`, `The Y is X`.
+3. Correction semantics — detect and store `{type, target, old_value, new_value}` records; supersede old facts.
+4. Revocation / reset semantics — `ACTIVE | SUPERSEDED | REVOKED | EXPIRED` state model.
+5. Conflict resolution — compiled context selects latest valid correction > latest ACTIVE fact.
+6. False-memory protection — block acknowledgements, filler, model answers, unsupported assumptions.
+7. Context compiler update — only ACTIVE / latest-correction entries in compiled context.
+8. Comprehensive regression tests (varied wording; no benchmark-phrase hardcoding).
+9. Re-run existing benchmark without methodology changes; compare Before/After.
+10. Regression gate — all 78+ existing tests must remain passing.
+11. Final report — update `benchmarks/COMPREHENSIVE_RESULTS.md`.
+
+**Engineering constraints:**
+- Preserve existing architecture.
+- Prefer small, composable changes.
+- Do not rewrite memory system unnecessarily.
+- Do not sacrifice isolation or fail-open behavior.
+- Do not treat LLM-generated answers as user facts.
+- Historical memories may stay in archive; SUPERSEDED/REVOKED must not appear in active context.
+- Run full test suite before finishing.
+
+**Exit criteria:** memory correctness ≥ 95%, correction accuracy ≥ 95%, false-memory rate ≈ 0%, interrogative noise = 0%, 78+ existing tests pass, `COMPREHENSIVE_RESULTS.md` updated.
+
 ## Non-Goals (MVP)
 
 - Requiring vector DB / Redis / embeddings.
