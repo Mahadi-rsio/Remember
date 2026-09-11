@@ -10,19 +10,22 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.config import get_settings
+from app.context.compiler import compile_context
+from app.memory.isolation import derive_isolation_keys
 from app.providers.base import AIProvider, ProviderResponse
 from app.providers.openai_compatible import UpstreamError
-from app.storage.archive import archive_request
+from app.storage.archive import archive_request, archive_request_async
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["proxy"])
 
 
-def _archive_inbound(request: Request, body: dict[str, Any]) -> None:
+async def _archive_inbound(request: Request, body: dict[str, Any]) -> None:
     """Persist raw messages / compute delta. Never raises into the hot path."""
     try:
-        delta = archive_request(body, headers=request.headers)
+        memory_ai = getattr(request.app.state, "memory_ai_adapter", None)
+        delta = await archive_request_async(body, headers=request.headers, memory_ai=memory_ai)
         if delta is not None and logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "archive conversation=%s new=%s dup=%s",
@@ -125,20 +128,51 @@ def _passthrough_response(result: ProviderResponse) -> Response:
     )
 
 
+async def _prepare_upstream_body(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return body
+
+    try:
+        conversation_id, _ = derive_isolation_keys(body, request.headers)
+        memory_ai = getattr(request.app.state, "memory_ai_adapter", None)
+        raw_budget = body.get("context_budget") or request.headers.get("x-context-budget")
+        budget_val: int | None = None
+        if raw_budget is not None:
+            try:
+                budget_val = int(raw_budget)
+            except (ValueError, TypeError):
+                pass
+
+        compile_res = await compile_context(
+            messages,
+            conversation_id=conversation_id,
+            budget=budget_val,
+            memory_ai=memory_ai,
+        )
+        upstream_body = dict(body)
+        upstream_body["messages"] = compile_res.messages
+        return upstream_body
+    except Exception:
+        logger.exception("Context compilation failed; forwarding original body to main AI")
+        return body
+
+
 @router.post("/chat/completions")
 async def chat_completions(request: Request) -> Response:
     body = await _read_json_body(request)
     if isinstance(body, JSONResponse):
         return body
 
-    _archive_inbound(request, body)
+    await _archive_inbound(request, body)
+    upstream_body = await _prepare_upstream_body(request, body)
 
     provider = _get_provider(request)
-    if body.get("stream"):
-        return await _stream_proxy(provider, "/chat/completions", body)
+    if upstream_body.get("stream"):
+        return await _stream_proxy(provider, "/chat/completions", upstream_body)
 
     try:
-        result = await provider.chat(body)
+        result = await provider.chat(upstream_body)
     except UpstreamError as exc:
         return _upstream_unavailable(exc)
     return _passthrough_response(result)
@@ -150,14 +184,15 @@ async def responses(request: Request) -> Response:
     if isinstance(body, JSONResponse):
         return body
 
-    _archive_inbound(request, body)
+    await _archive_inbound(request, body)
+    upstream_body = await _prepare_upstream_body(request, body)
 
     provider = _get_provider(request)
-    if body.get("stream"):
-        return await _stream_proxy(provider, "/responses", body)
+    if upstream_body.get("stream"):
+        return await _stream_proxy(provider, "/responses", upstream_body)
 
     try:
-        result = await provider.responses(body)
+        result = await provider.responses(upstream_body)
     except UpstreamError as exc:
         return _upstream_unavailable(exc)
     return _passthrough_response(result)

@@ -85,5 +85,31 @@ def write_context_version(
     return row
 
 
-def memory_changed(results: list[ApplyResult]) -> bool:
-    return any(r.action in ("create", "merge", "supersede") for r in results)
+def mark_items_obsolete(
+    session: Session,
+    conversation_id: str,
+    obsolete_descriptions: list[str],
+) -> list[MemoryItem]:
+    """Mark active memory items as obsolete when flagged by Memory AI."""
+    if not obsolete_descriptions:
+        return []
+    active = list_memory_items(session, conversation_id, status=MemoryStatus.ACTIVE.value)
+    marked: list[MemoryItem] = []
+    for desc in obsolete_descriptions:
+        desc_clean = desc.strip().casefold()
+        if not desc_clean:
+            continue
+        for item in active:
+            if item in marked:
+                continue
+            item_clean = item.content.casefold()
+            if desc_clean in item_clean or item_clean in desc_clean or (item.topic_key and item.topic_key.casefold() in desc_clean):
+                item.status = MemoryStatus.OBSOLETE.value
+                item.updated_at = utcnow()
+                session.add(item)
+                marked.append(item)
+    return marked
+
+
+def memory_changed(results: list[ApplyResult], *, obsolete_count: int = 0) -> bool:
+    return any(r.action in ("create", "merge", "supersede") for r in results) or obsolete_count > 0

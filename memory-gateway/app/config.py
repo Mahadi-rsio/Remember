@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     memory_ai_base_url: str = "https://openrouter.ai/api/v1"
     memory_ai_model: str = "cheap-model"
     memory_ai_api_key: str = ""
+    memory_ai_timeout: float = Field(default=30.0, ge=1.0)
+    memory_ai_retry_once: bool = True
 
     # Context
     context_budget: int = Field(default=8000, ge=1)

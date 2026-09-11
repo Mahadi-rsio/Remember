@@ -9,9 +9,10 @@ from typing import Any, Mapping
 from sqlmodel import Session, select
 
 from app.memory.delta import DeltaResult, detect_delta
-from app.memory.engine import process_memory_delta
+from app.memory.engine import process_memory_delta, process_memory_delta_async
 from app.memory.ids import NormalizedMessage
 from app.memory.isolation import derive_isolation_keys
+from app.providers.memory_ai import MemoryAIAdapter
 from app.storage.db import session_scope
 from app.storage.models import Conversation, Message, utcnow
 
@@ -122,6 +123,42 @@ def archive_request(
             except Exception:
                 logger.exception(
                     "memory update failed after archive; continuing to main AI"
+                )
+        return delta
+    except Exception:
+        logger.exception("raw archive failed; continuing without memory delta")
+        return None
+
+
+async def archive_request_async(
+    body: dict[str, Any],
+    headers: Mapping[str, str] | None = None,
+    memory_ai: MemoryAIAdapter | None = None,
+) -> DeltaResult | None:
+    """
+    Archive inbound messages asynchronously and process memory update.
+
+    Fail-open: failures never raise out to break the hot path.
+    """
+    try:
+        conversation_id, user_key = derive_isolation_keys(body, headers)
+        messages = _extract_message_list(body)
+        with session_scope() as session:
+            _ensure_conversation(session, conversation_id, user_key)
+            delta = detect_delta(
+                session,
+                conversation_id=conversation_id,
+                user_key=user_key,
+                messages=messages,
+            )
+            if delta.new_messages:
+                _persist_new_messages(session, conversation_id, delta.new_messages)
+        if delta.has_new:
+            try:
+                await process_memory_delta_async(delta, memory_ai=memory_ai)
+            except Exception:
+                logger.exception(
+                    "async memory update failed after archive; continuing to main AI"
                 )
         return delta
     except Exception:

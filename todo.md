@@ -45,32 +45,32 @@ Track work against `PROMT.md`. Check items as they land.
 
 ## Phase 4 — Memory AI (Optional)
 
-- [ ] Memory AI config (`MEMORY_AI_ENABLED`, provider, model, key)
-- [ ] Memory AI adapter (OpenRouter / OpenAI / compatible)
-- [ ] Structured JSON prompt + Pydantic validation
-- [ ] Retry-once on parse failure; keep prior memory otherwise
-- [ ] Tool-output compression → compact summary; raw preserved
-- [ ] Ensure Memory AI never used as main answer generator
-- [ ] Tests: mocked AI success/failure; malformed JSON isolation
+- [x] Memory AI config (`MEMORY_AI_ENABLED`, provider, model, key)
+- [x] Memory AI adapter (OpenRouter / OpenAI / compatible)
+- [x] Structured JSON prompt + Pydantic validation
+- [x] Retry-once on parse failure; keep prior memory otherwise
+- [x] Tool-output compression → compact summary; raw preserved
+- [x] Ensure Memory AI never used as main answer generator
+- [x] Tests: mocked AI success/failure; malformed JSON isolation
 
 ## Phase 5 — Context Compiler
 
-- [ ] Assembler: system + canonical + recent + tool results + new message
-- [ ] Token budget enforcement (`CONTEXT_BUDGET`)
-- [ ] Selector scoring (`value / token_cost`)
-- [ ] No naive head/tail truncation
-- [ ] Persist compiled context version snapshots
-- [ ] Tests: within budget, high-value priority, recent context kept
+- [x] Assembler: system + canonical + recent + tool results + new message
+- [x] Token budget enforcement (`CONTEXT_BUDGET`)
+- [x] Selector scoring (`value / token_cost`)
+- [x] No naive head/tail truncation
+- [x] Persist compiled context version snapshots
+- [x] Tests: within budget, high-value priority, recent context kept
 
 ## Phase 6 — Retrieval & Cache
 
-- [ ] SQLite FTS5 indexes for raw history + memory
-- [ ] `Retriever` interface + FTS backend
-- [ ] Stub/optional embedding path (off hot path)
-- [ ] Version-aware caches (request, extraction, compilation, retrieval)
-- [ ] Cache key includes conversation + context version + request hash
-- [ ] Optional Redis adapter (not required for MVP)
-- [ ] Background job hooks: embeddings, consolidation, repair
+- [x] SQLite FTS5 indexes for raw history + memory
+- [x] `Retriever` interface + FTS backend
+- [x] Stub/optional embedding path (off hot path)
+- [x] Version-aware caches (request, extraction, compilation, retrieval)
+- [x] Cache key includes conversation + context version + request hash
+- [x] Optional Redis adapter (not required for MVP)
+- [x] Background job hooks: embeddings, consolidation, repair
 
 ## Phase 7 — Hardening & Docs
 

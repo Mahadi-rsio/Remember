@@ -94,3 +94,28 @@ class CanonicalMemorySnapshot(BaseModel):
                 continue
             data[field_for[mtype]].append(content)
         return cls(**data)
+
+
+class MemoryAIOutput(BaseModel):
+    """Structured JSON contract expected from Memory AI compressor."""
+
+    summary: str = ""
+    facts: list[str] = Field(default_factory=list)
+    decisions: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    preferences: list[str] = Field(default_factory=list)
+    goals: list[str] = Field(default_factory=list)
+    architecture: list[str] = Field(default_factory=list)
+    important_events: list[str] = Field(default_factory=list)
+    active_tasks: list[str] = Field(default_factory=list)
+    obsolete_items: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+
+
+class ToolSummaryOutput(BaseModel):
+    """Structured JSON contract for tool output compression."""
+
+    summary: str
+    key_points: list[str] = Field(default_factory=list)
+    status: str = "success"

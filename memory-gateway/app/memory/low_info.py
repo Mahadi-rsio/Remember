@@ -32,6 +32,7 @@ _LOW_INFO_PHRASES: frozenset[str] = frozenset(
         "sure",
         "cool",
         "got it",
+        "sounds",
         "sounds good",
         "please",
         "pls",
@@ -42,6 +43,12 @@ _LOW_INFO_PHRASES: frozenset[str] = frozenset(
         "hm",
         "hmm",
         "huh",
+        "great",
+        "nice",
+        "perfect",
+        "awesome",
+        "good",
+        "fine",
         "+",
         "++",
     }
@@ -75,6 +82,9 @@ def is_low_info_message(content: str, *, role: str = "user") -> bool:
     if not normalized:
         return True
     if normalized in _LOW_INFO_PHRASES:
+        return True
+    words = normalized.split()
+    if words and all(w in _LOW_INFO_PHRASES for w in words):
         return True
     # Very short single-token acks after normalization
     if " " not in normalized and len(normalized) <= 3 and normalized.isalpha():

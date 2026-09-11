@@ -7,8 +7,9 @@ from fastapi import FastAPI
 
 from app.api.health import router as health_router
 from app.api.proxy import router as proxy_router
+from app.cache.redis_adapter import create_cache_backend
 from app.config import get_settings
-from app.providers import create_upstream_provider
+from app.providers import create_memory_ai_adapter, create_upstream_provider
 from app.storage.db import init_db
 
 
@@ -21,9 +22,17 @@ async def lifespan(app: FastAPI):
 
     provider = create_upstream_provider(settings)
     app.state.upstream_provider = provider
+    memory_ai = create_memory_ai_adapter(settings)
+    app.state.memory_ai_adapter = memory_ai
+
+    cache = create_cache_backend(settings.redis_url)
+    app.state.cache = cache
+
     try:
         yield
     finally:
+        if memory_ai is not None:
+            await memory_ai.aclose()
         await provider.aclose()
 
 
