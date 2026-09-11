@@ -124,9 +124,9 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Tests: two competing facts for same entity → only latest ACTIVE wins
 
 ### 8.6 Protect Against False Memories
-- [ ] Ensure existing low-info filter covers: `ok`, `thanks`, `yes`, `no`, `continue`, `sure`, `What?`, `Why?`, `How?`
-- [ ] Do not store: pure acknowledgements, conversational filler, model-generated answers as user facts, unsupported assumptions
-- [ ] Tests: all items above → no memory extraction
+- [x] Ensure existing low-info filter covers: `ok`, `thanks`, `yes`, `no`, `continue`, `sure`, `What?`, `Why?`, `How?`
+- [x] Do not store: pure acknowledgements, conversational filler, model-generated answers as user facts, unsupported assumptions
+- [x] Tests: all items above → no memory extraction
 
 ### 8.7 Update Context Compilation
 - [ ] Compiled context must contain only ACTIVE / latest-correction memories

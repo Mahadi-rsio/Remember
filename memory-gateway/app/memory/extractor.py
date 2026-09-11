@@ -11,7 +11,11 @@ from app.memory.ids import NormalizedMessage
 from app.memory.interrogative import is_interrogative
 from app.memory.low_info import is_low_info_message
 from app.memory.revocation import parse_revocation
-from app.memory.scorer import looks_like_correction, looks_speculative, score_candidate
+from app.memory.scorer import (
+    looks_like_correction,
+    looks_speculative,
+    score_candidate,
+)
 from app.models.memory import CandidateMemory, MemoryType, StructuredFact
 
 # Explicit typed prefixes: "decision: …", "[fact] …"
@@ -208,6 +212,13 @@ def extract_from_message(message: NormalizedMessage) -> list[CandidateMemory]:
     if is_low_info_message(message.content, role=message.role):
         return []
     if is_interrogative(message.content):
+        return []
+
+    # Unsupported assumptions / speculation must never become memories
+    # (todo 8.6): "Perhaps X is Y", "Maybe we should use Z", "I think ...",
+    # "We are considering ...". Explicit corrections/revocations are handled
+    # separately below and are not blocked by this guard.
+    if looks_speculative(message.content):
         return []
 
     # Strip leading correction markers ("Actually, ", "Correction: ", ...) and
