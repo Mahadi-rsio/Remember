@@ -10,6 +10,7 @@ from app.memory.contradiction import apply_candidate, load_active_items
 from app.memory.engine import process_memory_delta
 from app.memory.extractor import extract_candidates, extract_from_message, topic_key_from_content
 from app.memory.ids import normalize_message
+from app.memory.interrogative import is_interrogative
 from app.memory.low_info import is_low_info_message, normalize_utterance
 from app.memory.scorer import score_candidate
 from app.models.memory import (
@@ -278,3 +279,128 @@ def test_memory_failure_does_not_break_archive(tmp_db, monkeypatch):
     )
     assert delta is not None
     assert delta.has_new
+
+
+def test_interrogative_classifier_questions():
+    questions = [
+        "What is my name?",
+        "Why did we choose PostgreSQL?",
+        "When is the launch?",
+        "Where is the project deployed?",
+        "How does Cloudisy work?",
+        "What is my name",
+        "Why did we choose PostgreSQL",
+        "When is the launch",
+        "Where is the project deployed",
+        "How does Cloudisy work",
+        "What is the deployment target?",
+        "When is the beta launch?",
+        "What is the demo password?",
+        "What database does Cloudisy use now?",
+        "Which UI library do I prefer?",
+        "What language do I prefer?",
+        "Do I prefer dark mode or light mode?",
+        "Do we have a mobile app for Cloudisy?",
+        "Can you help me with the database?",
+        "Is PostgreSQL the database?",
+        "What?",
+        "Why?",
+        "How?",
+        "Tell me what the password is",
+        "Please tell me when the launch is",
+        "What's the deployment target",
+        "How much memory is used",
+        "Which database do we use",
+        "Do we use PostgreSQL",
+        "Did we choose Neon",
+    ]
+    for q in questions:
+        assert is_interrogative(q), f"Expected question: {q!r}"
+
+
+def test_interrogative_classifier_declarative_guards():
+    declaratives = [
+        "The reason why we chose PostgreSQL is reliability.",
+        "Where we deploy is AWS Lambda.",
+        "What we decided is to use Neon.",
+        "PostgreSQL is what we use.",
+        "I know what database we use: PostgreSQL.",
+        "I prefer TypeScript.",
+        "I prefer MUI over shadcn.",
+        "The deployment target is AWS Lambda.",
+        "The team uses the agile workflow.",
+        "Temporary detail: the demo password is temp1234.",
+        "Actually, Cloudisy changed from Neon to self-hosted PostgreSQL.",
+        "The temporary demo password was reset; ignore temp1234.",
+        "We decided against the mobile app for now.",
+        "I prefer dark mode in the dashboard.",
+        "Do not use MySQL.",
+        "Never use MongoDB.",
+        "We deploy wherever Docker is available.",
+        "I prefer PostgreSQL whenever possible.",
+        "Database = PostgreSQL",
+        "May release is scheduled for tomorrow.",
+        "Will is the project lead.",
+    ]
+    for d in declaratives:
+        assert not is_interrogative(d), f"Expected declarative statement: {d!r}"
+
+
+def test_interrogative_questions_yield_no_memory_candidates():
+    test_questions = [
+        "What is my name?",
+        "Why did we choose PostgreSQL?",
+        "When is the launch?",
+        "Where is the project deployed?",
+        "How does Cloudisy work?",
+        "What is the deployment target?",
+        "When is the beta launch?",
+        "What is the demo password?",
+        "What = my name?",
+    ]
+    for i, q in enumerate(test_questions):
+        msg = normalize_message({"role": "user", "content": q, "id": f"q{i}"}, ordinal=i)
+        assert extract_from_message(msg) == [], f"Should extract no candidates for: {q!r}"
+
+
+def test_interrogative_in_delta_process_stores_no_memory(tmp_db):
+    delta = archive_request(
+        {
+            "conversation_id": "interrogative_test_conv",
+            "messages": [
+                {"role": "user", "content": "What is my name?", "id": "m1"},
+                {"role": "user", "content": "Why did we choose PostgreSQL?", "id": "m2"},
+                {"role": "user", "content": "When is the launch?", "id": "m3"},
+                {"role": "user", "content": "Where is the project deployed?", "id": "m4"},
+                {"role": "user", "content": "How does Cloudisy work?", "id": "m5"},
+            ],
+        }
+    )
+    assert delta is not None
+    with session_scope() as session:
+        items = session.exec(
+            select(MemoryItem).where(MemoryItem.conversation_id == "interrogative_test_conv")
+        ).all()
+        assert len(items) == 0, f"Expected 0 memory items, got: {[it.content for it in items]}"
+
+
+def test_declarative_with_question_words_is_stored(tmp_db):
+    delta = archive_request(
+        {
+            "conversation_id": "declarative_test_conv",
+            "messages": [
+                {"role": "user", "content": "Database = PostgreSQL", "id": "d1"},
+                {"role": "user", "content": "The deployment target is AWS Lambda.", "id": "d2"},
+                {"role": "user", "content": "The reason why we chose PostgreSQL is reliability.", "id": "d3"},
+            ],
+        }
+    )
+    assert delta is not None
+    with session_scope() as session:
+        items = session.exec(
+            select(MemoryItem).where(MemoryItem.conversation_id == "declarative_test_conv")
+        ).all()
+        assert len(items) >= 2
+        contents = [it.content for it in items]
+        assert any("PostgreSQL" in c for c in contents)
+

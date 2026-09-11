@@ -6,6 +6,7 @@ import re
 from typing import Iterable
 
 from app.memory.ids import NormalizedMessage
+from app.memory.interrogative import is_interrogative
 from app.memory.low_info import is_low_info_message
 from app.memory.scorer import looks_like_correction, looks_speculative, score_candidate
 from app.models.memory import CandidateMemory, MemoryType
@@ -126,6 +127,15 @@ def _authority_for_role(role: str, content: str) -> str:
     return "speculation"
 
 
+_INVALID_KV_KEYS = frozenset(
+    {
+        "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+        "is", "are", "was", "were", "do", "does", "did", "can", "could",
+        "will", "would", "should", "shall", "have", "has", "had", "may", "might",
+    }
+)
+
+
 def _parse_prefix(content: str) -> tuple[MemoryType | None, str]:
     match = _PREFIX_RE.match(content)
     if not match:
@@ -138,7 +148,12 @@ def _parse_prefix(content: str) -> tuple[MemoryType | None, str]:
 def _classify(content: str) -> tuple[MemoryType, str] | None:
     typed, body = _parse_prefix(content)
     if typed is not None and body:
+        if is_interrogative(body):
+            return None
         return typed, body
+
+    if is_interrogative(content):
+        return None
 
     text = content.strip()
     for pattern, mtype in (
@@ -163,6 +178,8 @@ def _classify(content: str) -> tuple[MemoryType, str] | None:
     if kv:
         key = kv.group("key").strip()
         value = kv.group("value").strip()
+        if value.endswith("?") or key.casefold() in _INVALID_KV_KEYS:
+            return None
         # Prefer decision when phrasing looks decisive
         if re.search(r"\b(database|db|provider|stack|hosting)\b", key, re.I):
             return MemoryType.DECISION, f"{key} = {value}"
@@ -176,6 +193,8 @@ def extract_from_message(message: NormalizedMessage) -> list[CandidateMemory]:
     if message.role not in ("user", "assistant"):
         return []
     if is_low_info_message(message.content, role=message.role):
+        return []
+    if is_interrogative(message.content):
         return []
     # Assistant turns only yield memory when explicitly typed or clearly structured
     classified = _classify(message.content)

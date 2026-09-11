@@ -51,6 +51,13 @@ _LOW_INFO_PHRASES: frozenset[str] = frozenset(
         "fine",
         "+",
         "++",
+        "what",
+        "why",
+        "how",
+        "who",
+        "when",
+        "where",
+        "which",
     }
 )
 

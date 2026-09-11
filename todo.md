@@ -94,9 +94,9 @@ Track work against `PROMT.md`. Check items as they land.
 > Do NOT redesign proxy/streaming/storage/fail-open. Keep Memory-AI compressor disabled for this phase.
 
 ### 8.1 Fix Interrogative Noise
-- [ ] Add robust interrogative classifier (questions must never become factual memories)
-- [ ] Tests: `What is my name?`, `Why did we choose PostgreSQL?`, `When is the launch?`, `Where is the project deployed?`, `How does Cloudisy work?` → no memory extracted
-- [ ] Guard: declarative statements containing question-like words must still be stored
+- [x] Add robust interrogative classifier (questions must never become factual memories)
+- [x] Tests: `What is my name?`, `Why did we choose PostgreSQL?`, `When is the launch?`, `Where is the project deployed?`, `How does Cloudisy work?` → no memory extracted
+- [x] Guard: declarative statements containing question-like words must still be stored
 
 ### 8.2 Expand Deterministic Fact Extraction
 - [ ] Pattern: `I am building X.` / `X uses Y.` / `X's Z is …` / `I prefer X over Y.` / `The Y is X.`
