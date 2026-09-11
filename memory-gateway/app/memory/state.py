@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.memory.contradiction import ApplyResult, apply_candidate, load_active_items
 from app.models.memory import CandidateMemory, CanonicalMemorySnapshot, MemoryStatus
-from app.storage.models import ContextVersion, MemoryItem, utcnow
+from app.storage.models import ContextVersion, CorrectionRecord, MemoryItem, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,19 @@ def persist_candidates(
         # Ensure topic_key persisted on create/supersede via MemoryItem.topic_key
         result = apply_candidate(session, conversation_id, candidate, active_items=active)
         results.append(result)
+        if result.correction is not None and result.action == "supersede" and result.item is not None:
+            record = CorrectionRecord(
+                conversation_id=conversation_id,
+                target=result.correction.target,
+                old_value=result.correction.old_value,
+                new_value=result.correction.new_value,
+                status="active",
+                source_message_ids_json=json.dumps(
+                    candidate.source_message_ids, ensure_ascii=False
+                ),
+                created_at=utcnow(),
+            )
+            session.add(record)
         if result.action == "create" and result.item is not None:
             result.item.topic_key = candidate.topic_key
             session.add(result.item)

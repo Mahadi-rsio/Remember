@@ -8,6 +8,7 @@ from typing import Literal
 
 from sqlmodel import Session, select
 
+from app.memory.correction import Correction
 from app.memory.scorer import content_similarity, should_write_new_item
 from app.models.memory import CandidateMemory, MemoryStatus, MemoryType
 from app.storage.models import MemoryItem, utcnow
@@ -21,6 +22,7 @@ class ApplyResult:
     item: MemoryItem | None = None
     superseded: MemoryItem | None = None
     reason: str = ""
+    correction: Correction | None = None
 
 
 def _parse_source_ids(raw: str) -> list[str]:
@@ -79,6 +81,32 @@ def _is_contradiction(candidate: CandidateMemory, item: MemoryItem) -> bool:
     if not _same_topic(candidate, item):
         return False
     return content_similarity(candidate.content, item.content) < 0.90
+
+
+def _correction_old_match(candidate: CandidateMemory, active: list[MemoryItem]) -> MemoryItem | None:
+    """Find the active item that the candidate correction is replacing.
+
+    Matches by old_value containment / strong similarity, falling back to topic
+    match. Returns None when nothing clearly corresponds.
+    """
+    if candidate.correction is None:
+        return None
+    old = (candidate.correction.old_value or "").casefold().strip()
+    if not old:
+        return None
+    best: MemoryItem | None = None
+    best_score = 0.0
+    for item in active:
+        item_content = item.content.casefold()
+        if old in item_content:
+            return item
+        sim = content_similarity(old, item_content)
+        if sim > best_score:
+            best_score = sim
+            best = item
+    if best_score >= 0.75:
+        return best
+    return None
 
 
 def _can_supersede(candidate: CandidateMemory, existing: MemoryItem) -> bool:
@@ -162,6 +190,20 @@ def apply_candidate(
 
     candidate.scores = score_candidate(candidate, existing_contents=same_type_contents)
 
+    # Explicit correction: supersede the active item that holds the old value.
+    if candidate.correction is not None:
+        target = _correction_old_match(candidate, active)
+        if target is not None and _can_supersede(candidate, target):
+            new_item, old = supersede_item(session, target, candidate, conversation_id)
+            return ApplyResult(
+                action="supersede",
+                item=new_item,
+                superseded=old,
+                reason="correction",
+                correction=candidate.correction,
+            )
+        # Fall through to topic-based contradiction if no old-value target found.
+
     # Exact / near-duplicate → merge (confirmation), even if info_gain low
     for item in active:
         if _is_near_duplicate(candidate, item):
@@ -179,11 +221,19 @@ def apply_candidate(
                     reason="speculation_cannot_overwrite_decision",
                 )
             new_item, old = supersede_item(session, item, candidate, conversation_id)
+            correction = candidate.correction
+            if correction is None and candidate.is_correction:
+                correction = Correction(
+                    target=candidate.topic_key,
+                    old_value=item.content,
+                    new_value=candidate.content,
+                )
             return ApplyResult(
                 action="supersede",
                 item=new_item,
                 superseded=old,
                 reason="topic_contradiction",
+                correction=correction,
             )
 
     if not should_write_new_item(candidate.scores):

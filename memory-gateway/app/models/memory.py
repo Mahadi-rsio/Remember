@@ -7,6 +7,8 @@ from typing import Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.memory.correction import Correction
+
 
 class MemoryType(str, Enum):
     FACT = "fact"
@@ -81,6 +83,7 @@ class CandidateMemory(BaseModel):
     authority: str = "user"  # user | assistant | speculation
     is_correction: bool = False
     structured_fact: StructuredFact | None = None
+    correction: "Correction | None" = None
 
     @field_validator("content")
     @classmethod

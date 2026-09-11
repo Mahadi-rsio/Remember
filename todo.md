@@ -105,11 +105,11 @@ Track work against `PROMT.md`. Check items as they land.
 - [x] Tests: cover all new natural-language forms above
 
 ### 8.3 Implement Correction Semantics
-- [ ] Detect correction phrases: `X changed from A to B`, `X now uses Y instead of Z`, `We no longer use X`, `The Y was changed to X`, `Actually, …`, `I changed my preference from X to Y`
-- [ ] Store structured correction record: `{type, target, old_value, new_value, timestamp, status}`
-- [ ] Supersede old fact when correction is stored (status → SUPERSEDED)
-- [ ] Context compiler must surface `new_value` only; hide SUPERSEDED entries
-- [ ] Tests: Cloudisy Neon → self-hosted PostgreSQL correction path
+- [x] Detect correction phrases: `X changed from A to B`, `X now uses Y instead of Z`, `We no longer use X`, `The Y was changed to X`, `Actually, …`, `I changed my preference from X to Y`
+- [x] Store structured correction record: `{type, target, old_value, new_value, timestamp, status}`
+- [x] Supersede old fact when correction is stored (status → SUPERSEDED)
+- [x] Context compiler must surface `new_value` only; hide SUPERSEDED entries
+- [x] Tests: Cloudisy Neon → self-hosted PostgreSQL correction path
 
 ### 8.4 Implement Revocation / Reset Semantics
 - [ ] Detect revocation phrases: `was reset`, `ignore the previous`, `no longer valid`, `has been revoked`, `forget the previous value`

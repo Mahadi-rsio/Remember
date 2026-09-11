@@ -65,6 +65,21 @@ class MemoryItem(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class CorrectionRecord(SQLModel, table=True):
+    """Structured correction record (FIX.md §3 / todo 8.3)."""
+
+    __tablename__ = "corrections"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: str = Field(foreign_key="conversations.id", index=True, max_length=128)
+    target: str = Field(default="", max_length=256)
+    old_value: str = Field(default="", max_length=1024)
+    new_value: str = Field(default="", max_length=1024)
+    status: str = Field(default="active", max_length=32)
+    source_message_ids_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class ContextVersion(SQLModel, table=True):
     """Versioned context snapshot metadata (populated by later phases)."""
 

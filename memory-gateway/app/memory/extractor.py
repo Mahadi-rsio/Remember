@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from app.memory.facts import detect_preference_domain, extract_structured_fact
+from app.memory.correction import Correction, parse_correction, strip_correction_prefix
+from app.memory.facts import detect_preference_domain, extract_structured_fact, slugify
 from app.memory.ids import NormalizedMessage
 from app.memory.interrogative import is_interrogative
 from app.memory.low_info import is_low_info_message
@@ -208,7 +209,23 @@ def extract_from_message(message: NormalizedMessage) -> list[CandidateMemory]:
     if is_interrogative(message.content):
         return []
 
-    classified = _classify(message.content)
+    # Strip leading correction markers ("Actually, ", "Correction: ", ...) and
+    # re-check the remainder for interrogatives ("Actually, what did we use?").
+    stripped, had_prefix = strip_correction_prefix(message.content)
+    if is_interrogative(stripped):
+        return []
+
+    # Try structured correction phrases: "X changed from A to B", "X now uses B
+    # instead of A", "The Y was changed to B", "I changed my preference from A to B".
+    correction = parse_correction(stripped)
+    if correction is not None:
+        candidate = _build_correction_candidate(message, correction, text=stripped)
+        if candidate is not None:
+            return [candidate]
+
+    # Otherwise reclassify the prefix-stripped text; a stripped prefix still
+    # marks the resulting fact as a correction.
+    classified = _classify(stripped)
     if classified is None:
         return []
 
@@ -232,11 +249,88 @@ def extract_from_message(message: NormalizedMessage) -> list[CandidateMemory]:
         source_message_ids=[message.message_key],
         topic_key=topic_key,
         authority=authority,
-        is_correction=looks_like_correction(message.content),
+        is_correction=had_prefix or looks_like_correction(message.content),
         structured_fact=sfact,
     )
     candidate.scores = score_candidate(candidate)
     return [candidate]
+
+
+def _build_correction_candidate(
+    message: NormalizedMessage,
+    correction: Correction,
+    *,
+    text: str,
+) -> CandidateMemory | None:
+    """Build a CandidateMemory for an explicit correction (FIX.md §3)."""
+    target_lower = correction.target.casefold()
+    if target_lower in ("preference", "my preference", "choice"):
+        # "I changed my preference from A to B" -> user preference domain
+        attr, pref_topic = detect_preference_domain(correction.new_value, correction.old_value)
+        attr = attr if attr != "preference" else "preference"
+        sfact = StructuredFact(
+            entity="user",
+            attribute=attr,
+            value=correction.new_value,
+            memory_type=MemoryType.PREFERENCE,
+            raw_text=text,
+        )
+        topic_key = pref_topic
+        content = correction.new_value
+        mtype = MemoryType.PREFERENCE
+    else:
+        # "The Y was changed to B" / "The Y changed to B" → target names the attribute
+        # directly (deployment target, database, password, ...). Reuse the same
+        # conventions as extract_the_y_is_x so the correction supersedes cleanly.
+        if not correction.old_value:
+            attr = correction.target.strip()
+            attr_lower = attr.casefold()
+            if re.search(r"\b(target|deployment|database|db|provider|stack|hosting)\b", attr_lower):
+                mtype = MemoryType.DECISION
+            elif "preference" in attr_lower or "prefer" in attr_lower:
+                mtype = MemoryType.PREFERENCE
+            else:
+                mtype = MemoryType.FACT
+            sfact = StructuredFact(
+                entity=attr,
+                attribute=attr,
+                value=correction.new_value,
+                memory_type=mtype,
+                raw_text=text,
+            )
+            topic_key = sfact.to_topic_key()
+            content = sfact.to_content()
+        else:
+            # Entity-property correction, e.g. "Cloudisy changed from Neon to ..."
+            attr, _ = detect_preference_domain(correction.new_value, correction.old_value)
+            if attr in ("database", "ui_library", "frontend_framework", "theme", "workflow"):
+                mtype = MemoryType.DECISION
+            else:
+                attr = "technology"
+                mtype = MemoryType.FACT
+            sfact = StructuredFact(
+                entity=correction.target,
+                attribute=attr,
+                value=correction.new_value,
+                memory_type=mtype,
+                raw_text=text,
+            )
+            topic_key = sfact.to_topic_key()
+            content = sfact.to_content()
+
+    authority = _authority_for_role(message.role, message.content)
+    candidate = CandidateMemory(
+        content=content,
+        type=mtype,
+        source_message_ids=[message.message_key],
+        topic_key=topic_key,
+        authority=authority,
+        is_correction=True,
+        structured_fact=sfact,
+        correction=correction,
+    )
+    candidate.scores = score_candidate(candidate)
+    return candidate
 
 
 def extract_candidates(messages: Iterable[NormalizedMessage]) -> list[CandidateMemory]:
