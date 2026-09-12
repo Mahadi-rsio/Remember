@@ -147,7 +147,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
     expect(JSON.stringify(json)).not.toContain("secret-details");
   });
 
-  it("fails open: missing Turso config does not block upstream forwarding", async () => {
+  it("fails open: missing DB config does not block upstream forwarding", async () => {
     let upstreamCalled = false;
     globalThis.fetch = (async () => {
       upstreamCalled = true;

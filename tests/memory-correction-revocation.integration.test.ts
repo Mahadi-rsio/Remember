@@ -43,7 +43,7 @@ function compiledText(messages: Array<Record<string, any>>): string {
 
 describe("Correction Semantics Integration (real SQLite DB)", () => {
   it("supersedes old fact when user corrects the database choice", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-corr-db";
 
     await archive(db, [userMsg("Cloudisy uses Neon for database", "c1")], conv);
@@ -70,7 +70,7 @@ describe("Correction Semantics Integration (real SQLite DB)", () => {
   });
 
   it("supersedes preference contradiction (React -> Vue)", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-corr-pref";
 
     await archive(db, [userMsg("I prefer React for frontend work", "p1")], conv);
@@ -85,7 +85,7 @@ describe("Correction Semantics Integration (real SQLite DB)", () => {
   });
 
   it("compiled context surfaces only the corrected value and bumps context version", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-corr-compile";
 
     await archive(db, [userMsg("Cloudisy uses Neon for database", "k1")], conv);
@@ -113,7 +113,7 @@ describe("Correction Semantics Integration (real SQLite DB)", () => {
   });
 
   it("correction without matching old fact still stores the corrected value", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-corr-orphan";
 
     await archive(db, [userMsg("Actually, the deployment was changed to AWS Lambda", "o1")], conv);
@@ -125,7 +125,7 @@ describe("Correction Semantics Integration (real SQLite DB)", () => {
 
 describe("Revocation Semantics Integration (real SQLite DB)", () => {
   it("revokes stored secret after reset and excludes it from compiled context", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-revoke-1";
 
     await archive(db, [userMsg("The temporary password is temp1234", "r1")], conv);
@@ -151,7 +151,7 @@ describe("Revocation Semantics Integration (real SQLite DB)", () => {
   });
 
   it("revoked items remain in the raw archive for auditability", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-revoke-2";
 
     await archive(db, [userMsg("The temporary password is temp1234", "r1")], conv);

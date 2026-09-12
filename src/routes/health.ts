@@ -8,16 +8,16 @@ export const healthRouter = new Hono<HonoContext>();
 
 healthRouter.get("/health", async (c) => {
   const env = c.env;
-  let tursoReady = false;
+  let dbReady = false;
   let redisReady = false;
 
-  if (env.TURSO_DATABASE_URL) {
+  if (env.DATABASE_URL) {
     try {
       const db = getDb(env);
-      await db.run(sql`SELECT 1`);
-      tursoReady = true;
+      await db.execute(sql`SELECT 1`);
+      dbReady = true;
     } catch {
-      tursoReady = false;
+      dbReady = false;
     }
   }
 
@@ -35,16 +35,16 @@ healthRouter.get("/health", async (c) => {
   const isMemoryAiEnabled =
     String(env.MEMORY_AI_ENABLED).toLowerCase() === "true";
 
-  // Fail-open when Turso is not configured (proxy still works without memory)
-  const ready = tursoReady || !env.TURSO_DATABASE_URL;
+  // Fail-open when Neon is not configured (proxy still works without memory)
+  const ready = dbReady || !env.DATABASE_URL;
 
   return c.json({
     status: ready ? "ok" : "degraded",
     service: "remember-memory-gateway",
     runtime: "cloudflare-worker",
     database: {
-      provider: "turso",
-      ready: tursoReady,
+      provider: "neon",
+      ready: dbReady,
     },
     cache: {
       provider: "upstash-redis",

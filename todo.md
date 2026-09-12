@@ -145,7 +145,7 @@ Track work against `plan.md`. Check items as they land.
 ### 9.3 Memory Engine Unit Tests
 - [x] Fact extraction: `I am building X.`, `X uses Y.`, `I prefer X.`
 - [x] Multi-fact extraction: one message → multiple atomic facts (sentence split + multi-clause `uses` list)
-- [x] Stack update: "switched X to Y" supersedes the old value (e.g. Neon → Turso)
+- [x] Stack update: "switched X to Y" supersedes the old value (e.g. Turso → Neon)
 - [ ] Low-info skip: `ok`, `thanks`, `yes`, `continue`, `sure`
 - [ ] Interrogative skip: `What is my name?`, `Where is the server?`
 - [ ] Merge: same fact → update, not duplicate
@@ -171,7 +171,7 @@ Track work against `plan.md`. Check items as they land.
 - [ ] Deterministic fingerprint fallback consistent across calls
 
 ### 9.7 Fail-Open Tests
-- [ ] Turso error → main AI still called; error logged but not surfaced
+- [ ] DB error → main AI still called; error logged but not surfaced
 - [ ] Memory AI error → fallback to deterministic; main AI still called
 - [ ] Retrieval error → still call main AI
 

@@ -1,7 +1,7 @@
 {
   "name": "remember-memory-gateway",
   "version": "0.1.0",
-  "description": "AI Memory Gateway - Cloudflare Workers with Hono, Turso, Drizzle ORM, and Upstash Redis",
+  "description": "AI Memory Gateway - Cloudflare Workers with Hono, Neon, Drizzle ORM, and Upstash Redis",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -14,7 +14,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@libsql/client": "^0.18.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.4",
     "drizzle-orm": "^0.45.2",

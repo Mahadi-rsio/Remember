@@ -13,7 +13,7 @@ description: >-
 
 ## Stack
 
-**TypeScript · Cloudflare Workers · Hono · Drizzle ORM · Turso (libSQL) · Upstash Redis**
+**TypeScript · Cloudflare Workers · Hono · Drizzle ORM · Neon (PostgreSQL) · Upstash Redis**
 
 No Python. No Docker.
 
@@ -33,7 +33,7 @@ Do **not** re-read all docs every turn; load only what the task needs.
 3. Not conventional RAG-first; loop is `Context[n] + delta → memory → Context[n+1]`.
 4. Raw archive is authoritative; compact memory is derived and repairable.
 5. Memory failures must not break main AI forwarding.
-6. MVP: Turso (libSQL / SQLite-compatible); Upstash Redis optional only.
+6. MVP: Neon (PostgreSQL); Upstash Redis optional only.
 7. No MCP / custom client SDKs required — clients only change `base_url`.
 8. No Docker. No Python. Cloudflare Workers only.
 
@@ -43,7 +43,7 @@ Do **not** re-read all docs every turn; load only what the task needs.
 |-------|--------|--------|
 | 0 | Skeleton + Hono + health | ✅ Done |
 | 1 | Transparent OpenAI proxy + streaming | ✅ Done |
-| 2 | Turso archive + delta detection | ✅ Done |
+| 2 | Neon archive + delta detection | ✅ Done |
 | 3 | Deterministic memory engine | ✅ Done |
 | 4 | Optional Memory AI compressor | ✅ Done |
 | 5 | Fixed-budget context compiler | ✅ Done |
@@ -61,7 +61,7 @@ bun run dev              # local dev via wrangler dev (port 8787)
 bun test                 # run test suite
 bun run typecheck        # tsc --noEmit
 bun run deploy           # deploy to Cloudflare Workers
-bun run db:migrate         # apply Turso migrations
+bun run db:migrate         # apply Neon migrations
 bun run db:generate        # generate Drizzle migrations
 bun run db:studio          # open Drizzle Studio
 ```
@@ -106,7 +106,7 @@ After finishing meaningful work in a phase:
 | Memory-AI compressor? | Keep disabled unless user asks; deterministic engine must be independently correct |
 | Local base URL? | `http://localhost:8787/v1` (wrangler dev) |
 | Config secrets? | `wrangler secret put <KEY>` — never in `wrangler.jsonc` or committed files |
-| Database? | Turso via `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` |
+| Database? | Neon via `DATABASE_URL` |
 
 ## Extra reference
 

@@ -1,7 +1,7 @@
 export interface Env {
-  // Turso / libSQL
-  TURSO_DATABASE_URL?: string;
-  TURSO_AUTH_TOKEN?: string;
+  // Neon / PostgreSQL
+  DATABASE_URL?: string;
+  NEON_API_KEY?: string;
 
   // Upstash Redis (Optional for caching / rate limiting)
   UPSTASH_REDIS_REST_URL?: string;

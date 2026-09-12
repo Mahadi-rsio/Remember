@@ -1,17 +1,17 @@
-import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
+import { pgTable, varchar, text, timestamp, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export const conversations = sqliteTable(
+export const conversations = pgTable(
   "conversations",
   {
-    id: text("id", { length: 128 }).primaryKey(),
-    userKey: text("user_key", { length: 128 }),
-    createdAt: text("created_at")
+    id: varchar("id", { length: 128 }).primaryKey(),
+    userKey: varchar("user_key", { length: 128 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .notNull()
-      .default(sql`(CURRENT_TIMESTAMP)`),
-    updatedAt: text("updated_at")
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
       .notNull()
-      .default(sql`(CURRENT_TIMESTAMP)`),
+      .default(sql`now()`),
     metadataJson: text("metadata_json"),
   },
   (table) => [

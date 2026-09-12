@@ -2,7 +2,7 @@
 
 ## Product Summary
 
-Build a production-oriented **AI Memory Gateway / Context Compression Proxy** in **TypeScript** on **Cloudflare Workers** (Hono + Turso + Upstash Redis). It sits transparently between OpenAI-compatible clients (OpenCode, Codex, etc.) and the real upstream AI API. The gateway optimizes what is sent **to** the main model and must never alter what comes **back**.
+Build a production-oriented **AI Memory Gateway / Context Compression Proxy** in **TypeScript** on **Cloudflare Workers** (Hono + Neon + Upstash Redis). It sits transparently between OpenAI-compatible clients (OpenCode, Codex, etc.) and the real upstream AI API. The gateway optimizes what is sent **to** the main model and must never alter what comes **back**.
 
 ## Stack
 
@@ -10,7 +10,7 @@ Build a production-oriented **AI Memory Gateway / Context Compression Proxy** in
 |-------|-----------|
 | Runtime | Cloudflare Workers |
 | Framework | Hono |
-| Database | Turso (libSQL / SQLite-compatible) |
+| Database | Neon (PostgreSQL) |
 | Cache | Upstash Redis (optional) |
 | ORM | Drizzle ORM |
 | Language | TypeScript |
@@ -31,9 +31,9 @@ Build a production-oriented **AI Memory Gateway / Context Compression Proxy** in
 ### Phase 0 — Project skeleton ✅
 
 - Hono app entry (`src/index.ts`) + env bindings via `wrangler.jsonc`.
-- Config via `.dev.vars`: upstream provider, memory AI, budget, auth, Turso URL/token.
+- Config via `.dev.vars`: upstream provider, memory AI, budget, auth, Neon URL.
 - Health endpoint and basic app bootstrap.
-- `wrangler dev` runs locally with Turso over HTTP (no Redis required).
+- `wrangler dev` runs locally with Neon over HTTP (no Redis required).
 
 **Exit criteria:** Hono app starts; env loads; `bun run dev` works.
 

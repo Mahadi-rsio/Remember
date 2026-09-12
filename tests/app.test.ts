@@ -8,7 +8,7 @@ describe("Hono Worker App Endpoints", () => {
     const json = (await res.json()) as any;
     expect(json.name).toBe("remember-memory-gateway");
     expect(json.runtime).toBe("Cloudflare Workers");
-    expect(json.database).toContain("Turso");
+    expect(json.database).toContain("Neon");
   });
 
   it("responds on GET /health", async () => {
@@ -20,7 +20,7 @@ describe("Hono Worker App Endpoints", () => {
     const json = (await res.json()) as any;
     expect(json.status).toBe("ok");
     expect(json.service).toBe("remember-memory-gateway");
-    expect(json.database.provider).toBe("turso");
+    expect(json.database.provider).toBe("neon");
   });
 
   it("enforces authentication when GATEWAY_API_KEY is configured", async () => {

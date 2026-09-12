@@ -30,7 +30,7 @@ async function activeContents(db: Database, conv: string): Promise<string[]> {
 
 describe("Archive + Delta Integration (real SQLite DB)", () => {
   it("persists new messages and re-identifies them as duplicates on retry", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-delta-1";
     const messages = [userMsg("Cloudisy uses PostgreSQL for storage", "m1")];
 
@@ -50,7 +50,7 @@ describe("Archive + Delta Integration (real SQLite DB)", () => {
   });
 
   it("stores only meaningful facts and skips low-info affirmations", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(
       db,
       [
@@ -67,7 +67,7 @@ describe("Archive + Delta Integration (real SQLite DB)", () => {
   });
 
   it("does not create memory from pure questions", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(
       db,
       [
@@ -83,7 +83,7 @@ describe("Archive + Delta Integration (real SQLite DB)", () => {
   });
 
   it("persists messages into the raw archive even when memory engine runs", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(db, [userMsg("We decided to use Drizzle ORM", "m-raw")], "conv-raw");
 
     const delta = await detectDelta(db, conv, null, [userMsg("We decided to use Drizzle ORM", "m-raw")]);

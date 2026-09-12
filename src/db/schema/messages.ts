@@ -1,24 +1,24 @@
-import { sqliteTable, integer, text, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { pgTable, varchar, text, timestamp, serial, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { conversations } from "./conversations";
 
-export const messages = sqliteTable(
+export const messages = pgTable(
   "messages",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    conversationId: text("conversation_id", { length: 128 })
+    id: serial("id").primaryKey(),
+    conversationId: varchar("conversation_id", { length: 128 })
       .notNull()
       .references(() => conversations.id),
-    messageKey: text("message_key", { length: 128 }).notNull(),
-    role: text("role", { length: 32 }).notNull(),
+    messageKey: varchar("message_key", { length: 128 }).notNull(),
+    role: varchar("role", { length: 32 }).notNull(),
     content: text("content").notNull(),
-    contentHash: text("content_hash", { length: 64 }).notNull(),
+    contentHash: varchar("content_hash", { length: 64 }).notNull(),
     ordinal: integer("ordinal").notNull().default(0),
-    clientMessageId: text("client_message_id", { length: 128 }),
+    clientMessageId: varchar("client_message_id", { length: 128 }),
     metadataJson: text("metadata_json"),
-    createdAt: text("created_at")
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .notNull()
-      .default(sql`(CURRENT_TIMESTAMP)`),
+      .default(sql`now()`),
   },
   (table) => [
     index("idx_messages_conversation_id").on(table.conversationId),

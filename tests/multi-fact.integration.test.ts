@@ -30,7 +30,7 @@ async function all(db: Database, conv: string) {
 
 describe("Multi-fact atomic extraction", () => {
   it("persists a single atomic database fact from a uses statement", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(db, [userMsg("Remember uses Neon for its database.")], "mf-single");
 
     const items = await active(db, conv);
@@ -40,7 +40,7 @@ describe("Multi-fact atomic extraction", () => {
   });
 
   it("persists multiple atomic facts from one message", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(
       db,
       [
@@ -61,7 +61,7 @@ describe("Multi-fact atomic extraction", () => {
   });
 
   it("persists 6+ atomic facts from a long stack message", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(
       db,
       [
@@ -77,7 +77,7 @@ describe("Multi-fact atomic extraction", () => {
   });
 
   it("supersedes the old database when the stack is switched", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(db, [userMsg("Remember uses Neon for its database.")], "mf-switch");
 
     await archive(db, [userMsg("We switched Remember to Turso for the database.")], conv);
@@ -92,7 +92,7 @@ describe("Multi-fact atomic extraction", () => {
   });
 
   it("isolates facts per conversation", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     await archive(db, [userMsg("Remember uses Neon for its database.")], "mf-proj-a");
     await archive(db, [userMsg("Cloudisy uses PostgreSQL for storage.")], "mf-proj-b");
 
@@ -105,7 +105,7 @@ describe("Multi-fact atomic extraction", () => {
   });
 
   it("retrieves the database fact for a wording-variant query", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = await archive(db, [userMsg("Remember uses Turso for its database.")], "mf-query");
 
     const result = await compileContext(db, [

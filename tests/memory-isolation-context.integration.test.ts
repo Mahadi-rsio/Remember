@@ -32,7 +32,7 @@ function compiledText(messages: Array<Record<string, any>>): string {
 
 describe("Conversation Isolation Integration (real SQLite DB)", () => {
   it("never leaks memories between conversations", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
 
     await archive(
       db,
@@ -55,7 +55,7 @@ describe("Conversation Isolation Integration (real SQLite DB)", () => {
   });
 
   it("compiled context for conversation B excludes conversation A memory", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
 
     await archive(
       db,
@@ -82,7 +82,7 @@ describe("Conversation Isolation Integration (real SQLite DB)", () => {
 
 describe("Memory Merge & Staleness Integration (real SQLite DB)", () => {
   it("merges near-duplicate restatements instead of creating new items", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-merge";
 
     await archive(db, [userMsg("Cloudisy uses PostgreSQL for its database", "d1")], conv);
@@ -98,7 +98,7 @@ describe("Memory Merge & Staleness Integration (real SQLite DB)", () => {
   });
 
   it("only the latest ACTIVE value survives conflicting updates", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-stale";
 
     await archive(db, [userMsg("I prefer dark theme", "s1")], conv);
@@ -111,7 +111,7 @@ describe("Memory Merge & Staleness Integration (real SQLite DB)", () => {
   });
 
   it("keeps unrelated memories alongside corrections", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-unrelated";
 
     await archive(db, [userMsg("The project name is Cloudisy", "u1")], conv);
@@ -128,7 +128,7 @@ describe("Memory Merge & Staleness Integration (real SQLite DB)", () => {
 
 describe("Context Compiler Budget Integration (real SQLite DB)", () => {
   it("respects budget while preserving system and latest message with real memories", async () => {
-    const db = createTestDb();
+    const db = await createTestDb();
     const conv = "conv-budget";
 
     await archive(db, [userMsg("Cloudisy uses PostgreSQL for its database", "b1")], conv);

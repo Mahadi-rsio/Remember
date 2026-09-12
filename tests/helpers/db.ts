@@ -1,32 +1,35 @@
-import { Database } from "bun:sqlite";
-import { drizzle as drizzleBun } from "drizzle-orm/bun-sqlite";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "../../src/db/schema";
 import type { Database as AppDatabase } from "../../src/db";
+import { conversations } from "../../src/db/schema/conversations";
+import { messages } from "../../src/db/schema/messages";
+import { memoryItems } from "../../src/db/schema/memory";
+import { contextVersions } from "../../src/db/schema/context";
+import { corrections } from "../../src/db/schema/corrections";
 
-const MIGRATION_PATH = resolve(__dirname, "../../drizzle/0000_powerful_nemesis.sql");
-
-function applyMigration(sqlite: Database): void {
-  const sql = readFileSync(MIGRATION_PATH, "utf-8");
-  const statements = sql
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  for (const stmt of statements) {
-    sqlite.exec(stmt);
-  }
-}
+const TABLES = [conversations, messages, memoryItems, contextVersions, corrections];
 
 /**
- * Creates a real in-memory SQLite database with the production schema
- * applied, wrapped in a Drizzle instance compatible with the memory engine.
- * Each call returns an isolated, fully-writable database.
+ * Creates a connection to the Neon test database (DATABASE_URL), wrapped in a
+ * Drizzle instance compatible with the memory engine. Each call truncates all
+ * tables first so every test starts isolated. Requires a live Neon test DB
+ * with the production schema already applied (see scripts/migrate.ts).
  */
-export function createTestDb(): AppDatabase {
-  const sqlite = new Database(":memory:");
-  applyMigration(sqlite);
-  sqlite.exec("PRAGMA foreign_keys = ON");
-  return drizzleBun(sqlite, { schema }) as unknown as AppDatabase;
+export async function createTestDb(): Promise<AppDatabase> {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is required to run integration tests. Point it at a Neon test database."
+    );
+  }
+
+  const sql = neon(url);
+  const db = drizzle(sql, { schema }) as unknown as AppDatabase;
+
+  for (const table of TABLES) {
+    await db.execute(`TRUNCATE TABLE ${table.getSQL().replace(/\s+/g, " ").trim()} RESTART IDENTITY CASCADE`);
+  }
+
+  return db;
 }

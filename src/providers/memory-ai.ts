@@ -26,7 +26,7 @@ Output strictly valid JSON conforming to this schema:
 
 Rules:
 1. Extract only high-value information.
-2. Each bullet must be a single atomic fact. For example, "Uses Cloudflare Workers, Hono, Turso, Upstash Redis, Groq" must become separate entries, not one.
+2. Each bullet must be a single atomic fact. For example, "Uses Cloudflare Workers, Hono, Neon, Upstash Redis, Groq" must become separate entries, not one.
 3. When the user switches/changes a previously stated value (e.g. "we switched X to Y"), list the new value under the appropriate list and add the old one to "obsolete_items".
 4. User statements and explicit decisions have highest authority.
 5. Assistant speculation must NOT be recorded as confirmed facts/decisions.
