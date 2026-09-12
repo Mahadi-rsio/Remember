@@ -4,13 +4,24 @@
 
 The Memory Gateway is a **stateful context transformation layer**, not a chatbot and not a conventional RAG system. It receives OpenAI-compatible requests, maintains persistent conversation memory, compiles a fixed-budget context, forwards to the **main** AI provider, and returns the upstream response **unchanged**.
 
+## Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Runtime | Cloudflare Workers |
+| Framework | Hono |
+| Database | Cloudflare D1 (SQLite-compatible) |
+| ORM | Drizzle ORM |
+| Cache | Upstash Redis (optional) |
+| Language | TypeScript |
+
 ## High-Level Data Flow
 
 ```
 OpenCode / Codex / AI Client
             │
             ▼
-      Memory Gateway (FastAPI)
+      Memory Gateway (Cloudflare Workers / Hono)
             │
      ┌──────┴─────────┐
      │                │
@@ -56,38 +67,63 @@ Fixed-Budget Context
 Preferred critical path — keep it lightweight:
 
 1. Receive OpenAI-compatible request
-2. Authenticate / isolate conversation
+2. Authenticate / isolate conversation (`X-Conversation-Id` header or fingerprint)
 3. Identify **delta** vs already-processed messages
-4. Persist raw messages to archive
+4. Persist raw messages to D1 archive (via `waitUntil` — non-blocking)
 5. Load current versioned canonical memory
 6. Deterministic memory processing
 7. Call Memory AI **only when necessary**
 8. Compile optimized context under token budget
 9. Forward to main upstream API
 10. Proxy response (stream or non-stream) **unchanged**
-11. Optionally record assistant output for memory (post-complete / async)
+11. Record assistant output for memory (post-complete / async via `waitUntil`)
 
-Expensive work (embeddings, deep consolidation, archival indexing, memory repair, long-term summarization) runs **asynchronously** and must not block token delivery.
+Expensive work (embeddings, deep consolidation, archival indexing, memory repair, long-term summarization) uses Cloudflare's `waitUntil` and must not block token delivery.
 
 ## Component Map
 
 ```
-memory-gateway/
-├── app/
-│   ├── api/           # OpenAI-compatible HTTP routes
-│   ├── providers/     # Upstream + Memory AI adapters
-│   ├── memory/        # Delta, extract, compress, score, contradict, state
-│   ├── context/       # Compiler, budget, selector
-│   ├── storage/       # SQLite / SQLModel models & repos
-│   ├── retrieval/     # FTS5 (+ future vector backends)
-│   ├── cache/         # Version-aware caches
-│   ├── models/        # Pydantic schemas
-│   └── main.py
-├── tests/
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-└── requirements.txt
+src/
+├── index.ts              # Hono app entry, middleware
+├── env.ts                # Env bindings interface (D1, Upstash, vars)
+├── routes/
+│   ├── v1.ts             # OpenAI-compatible HTTP routes
+│   ├── health.ts         # Health check routes
+│   ├── auth.ts           # Gateway API key auth middleware
+│   └── rate-limit.ts     # Upstash Ratelimit middleware
+├── providers/
+│   ├── openai-compatible.ts  # Main upstream adapter
+│   └── memory-ai.ts          # Optional Memory AI adapter
+├── memory/
+│   ├── delta.ts          # Delta detection (new vs processed)
+│   ├── extractor.ts      # Candidate memory extraction
+│   ├── engine.ts         # Memory pipeline orchestrator
+│   ├── compressor.ts     # Tool-output compaction
+│   ├── scorer.ts         # confidence, importance, freshness, etc.
+│   ├── contradiction.ts  # Versioned supersede logic
+│   ├── correction.ts     # Correction phrase detection
+│   ├── revocation.ts     # Revocation phrase detection
+│   ├── interrogative.ts  # Question classifier (no extraction)
+│   ├── low-info.ts       # Low-info message filter
+│   ├── facts.ts          # Declarative fact patterns
+│   ├── state.ts          # Canonical memory CRUD + versioning
+│   ├── ids.ts            # Message ID extraction + hash fallback
+│   └── isolation.ts      # Conversation / user isolation keys
+├── context/
+│   ├── compiler.ts       # Fixed-budget context assembler
+│   ├── assembler.ts      # Message list builder
+│   ├── selector.ts       # Score-based item selection
+│   └── tokens.ts         # Token counting utilities
+├── storage/
+│   └── archive.ts        # Raw message archive writer
+├── retrieval/            # FTS retriever interface + D1 backend
+├── cache/                # Version-aware cache (Upstash Redis optional)
+├── models/               # Zod schemas + TypeScript types
+└── db/                   # Drizzle ORM setup + D1 client
+
+drizzle/                  # Generated SQL migrations
+tests/                    # Bun test suite
+wrangler.jsonc            # Cloudflare Workers config
 ```
 
 ### API layer
@@ -98,38 +134,46 @@ memory-gateway/
 
 ### Provider layer
 
-```python
-class AIProvider:
-    async def chat(...)
-    async def responses(...)
-    async def stream(...)
+```typescript
+class OpenAICompatibleProvider {
+  async chat(body: Record<string, any>): Promise<ProxyResult>
+  async responses(body: Record<string, any>): Promise<ProxyResult>
+  async openStream(path: string, body: Record<string, any>): Promise<StreamResult>
+  async models(): Promise<ProxyResult>
+}
 ```
 
 - **Main provider** (mandatory): generates the user-facing answer.
 - **Memory AI provider** (optional): compresses/extracts structured memory only.
-- First implementation: OpenAI-compatible HTTP adapter with configurable base URL.
-- Native Anthropic/Gemini adapters can be added later without touching the memory engine.
+- Implementation: OpenAI-compatible HTTP adapter with configurable base URL.
 
 ### Memory engine
 
 | Module | Responsibility |
 |--------|----------------|
-| `delta.py` | Detect new vs processed messages (IDs or hashes) |
-| `extractor.py` | Candidate memory extraction (rules + AI) |
-| `compressor.py` | Summaries, tool-output compaction |
-| `scorer.py` | confidence, importance, stability, freshness, information_gain |
-| `contradiction.py` | Versioned supersede; protect confirmed decisions |
-| `state.py` | Canonical memory CRUD + versioning |
+| `delta.ts` | Detect new vs processed messages (IDs or hashes) |
+| `extractor.ts` | Candidate memory extraction (rules + optional AI) |
+| `compressor.ts` | Summaries, tool-output compaction |
+| `scorer.ts` | confidence, importance, stability, freshness, information_gain |
+| `contradiction.ts` | Versioned supersede; protect confirmed decisions |
+| `correction.ts` | Detect correction phrases; store `{type, target, old_value, new_value}` |
+| `revocation.ts` | Detect revocation; set memory → REVOKED |
+| `interrogative.ts` | Classify questions → skip extraction entirely |
+| `low-info.ts` | Filter trivial messages (ok, thanks, yes…) |
+| `state.ts` | Canonical memory CRUD + versioning |
+| `isolation.ts` | Per-conversation / per-user key derivation |
 
 Pipeline per delta:
 
 ```
 New Messages
-  → Deterministic Rules
+  → Interrogative Classifier (skip if question)
+  → Low-Info Filter (skip if trivial)
+  → Deterministic Rules (facts, corrections, revocations)
   → Candidate Extraction
   → Duplicate Detection
   → Contradiction Detection
-  → Cheap AI Compression (if needed)
+  → Cheap AI Compression (if needed and enabled)
   → Canonical Memory Update
   → Versioned Context State
 ```
@@ -139,16 +183,14 @@ New Messages
 Combines, under `CONTEXT_BUDGET`:
 
 - System instructions
-- Canonical memory (selected items)
+- Canonical memory (ACTIVE items only — no SUPERSEDED / REVOKED)
 - Relevant recent context
 - Important current tool results
 - New user message
 
-Selection score ≈ `value / token_cost`, where value includes relevance, confidence, importance, freshness, stability, and information gain. Avoid naive truncation.
+Selection score ≈ `value / token_cost`, where value includes relevance, confidence, importance, freshness, stability, and information gain. No naive truncation.
 
-### Storage
-
-**SQLite + FTS5** for MVP.
+### Storage (Cloudflare D1)
 
 Three memory layers:
 
@@ -158,41 +200,48 @@ Three memory layers:
 
 Every canonical update creates a new **context version** (`conversation_id`, `version`, `state`, `created_at`, `source_message_ids`). Never destructively mutate the only copy.
 
-### Retrieval
-
-```python
-class Retriever:
-    async def search(...): ...
+Schema managed by **Drizzle ORM**; migrations in `drizzle/`. Apply with:
+```bash
+bun run db:migrate:local   # local D1
+bun run db:migrate:remote  # production D1
 ```
 
-- MVP backend: SQLite FTS5.
-- Future: pgvector, Qdrant, Weaviate, Milvus.
+### Retrieval
+
+```typescript
+interface Retriever {
+  search(query: string, conversationId: string, limit?: number): Promise<MemoryItem[]>
+}
+```
+
+- MVP backend: D1 FTS (SQLite-compatible).
+- Future: pgvector, Qdrant, Weaviate.
 - Embeddings optional; use only when semantic retrieval is needed.
 
 ### Cache
 
-Optional Redis; SQLite sufficient for v1.
+Optional Upstash Redis; D1 sufficient for v1.
 
-Layers: request, memory extraction, context compilation, retrieval, embedding.
+Layers: request, memory extraction, context compilation, retrieval.
 
 Keys must include versions/hashes, e.g. `conversation_id + context_version + request_hash`. Never let an old cache entry override a newer context version.
 
 ## Memory Item Model
 
-```json
-{
-  "content": "...",
-  "type": "decision",
-  "confidence": 0.96,
-  "importance": 0.91,
-  "stability": 0.88,
-  "freshness": 0.70,
-  "information_gain": 0.40,
-  "source_message_ids": [],
-  "created_at": "...",
-  "updated_at": "...",
-  "status": "active",
-  "version": 12
+```typescript
+interface MemoryItem {
+  content: string;
+  type: "fact" | "decision" | "constraint" | "preference" | "goal" | "architecture" | "important_event" | "active_task";
+  confidence: number;    // 0–1
+  importance: number;    // 0–1
+  stability: number;     // 0–1
+  freshness: number;     // 0–1
+  information_gain: number; // 0–1
+  source_message_ids: string[];
+  created_at: string;
+  updated_at: string;
+  status: "ACTIVE" | "SUPERSEDED" | "REVOKED" | "EXPIRED";
+  version: number;
 }
 ```
 
@@ -200,7 +249,7 @@ Separate scores — do not collapse into one metric. Explicit user decisions out
 
 ## Memory AI Contract
 
-When enabled, Memory AI returns **strict JSON** (schema-validated), e.g.:
+When enabled, Memory AI returns **strict JSON** (Zod-validated):
 
 ```json
 {
@@ -225,39 +274,42 @@ Memory AI must **not** generate the user's final answer.
 | Failure | Fallback |
 |---------|----------|
 | Memory AI down / bad JSON | Previous canonical memory + recent messages |
-| SQLite / retrieval error | Best-effort recent messages → still call main AI |
-| Embedding / cache miss | Skip optional path; continue |
+| D1 / retrieval error | Best-effort recent messages → still call main AI |
+| Upstash Redis miss | Skip cache; continue |
+| `waitUntil` task failure | Silently discarded; main response already sent |
 
 Main upstream should remain usable whenever possible.
 
 ## Streaming
 
-For `"stream": true`, proxy upstream SSE chunks directly. Do not buffer the full stream unless required. Memory extraction runs after completion or async. Never delay tokens for background memory work.
+For `"stream": true`, proxy upstream SSE chunks directly via `Response` with streaming body. Do not buffer. Memory extraction runs after completion via `waitUntil`. Never delay tokens for background memory work.
 
 ## Security Boundaries
 
-- API authentication hooks
-- Per-user / conversation isolation
-- Request size limits
-- Rate limiting hooks
-- Secret redaction; no API-key logging
+- API authentication via `GATEWAY_API_KEY` bearer token
+- Per-user / conversation isolation (`X-Conversation-Id` or fingerprint)
+- Request size limits (`MAX_REQUEST_BYTES`)
+- Rate limiting via Upstash Ratelimit
+- Secret redaction; no API-key logging; upstream keys never in D1 archive
 - Configurable retention
-- Never store upstream API keys in raw conversation logs
 
-## Configuration Surface (conceptual)
+## Configuration Surface
 
 | Variable | Role |
 |----------|------|
-| `UPSTREAM_PROVIDER` / `UPSTREAM_BASE_URL` / `UPSTREAM_API_KEY` | Main AI |
-| `MEMORY_AI_ENABLED` / `MEMORY_AI_*` | Optional compressor |
+| `UPSTREAM_BASE_URL` / `UPSTREAM_API_KEY` | Main AI provider |
+| `MEMORY_AI_ENABLED` / `MEMORY_AI_*` | Optional Memory AI compressor |
 | `CONTEXT_BUDGET` | Token budget for compiled context |
-| SQLite path / retention / auth secrets | Persistence & security |
+| `GATEWAY_API_KEY` | Optional client→gateway bearer auth |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Optional Redis cache + rate limiting |
+| D1 binding `DB` | Persistence (managed by Cloudflare) |
 
 ## What This Is Not
 
 - Not a RAG-first embedding → top-k → LLM loop for every turn
 - Not a replacement for the main reasoning model
 - Not a client-visible memory chatbot API (transparency is the product)
+- Not a Docker/server app (Cloudflare Workers edge runtime)
 
 ## Design Invariant
 

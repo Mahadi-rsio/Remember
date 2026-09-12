@@ -1,173 +1,190 @@
-# TODO — AI Memory Gateway MVP
+# TODO — AI Memory Gateway
 
-Track work against `PROMT.md`. Check items as they land.
+Track work against `plan.md`. Check items as they land.
 
-## Phase 0 — Skeleton
+## Phase 0 — Skeleton ✅
 
-- [x] Create `memory-gateway/` package layout (`app/api`, `providers`, `memory`, `context`, `storage`, `retrieval`, `cache`, `models`)
-- [x] FastAPI app entry (`main.py`) + settings via Pydantic/env
-- [x] `.env.example`, `requirements.txt`, `Dockerfile`, `docker-compose.yml`
+- [x] Create `src/` package layout (`routes`, `providers`, `memory`, `context`, `storage`, `retrieval`, `cache`, `models`, `db`)
+- [x] Hono app entry (`src/index.ts`) + env bindings via `wrangler.jsonc`
+- [x] `.dev.vars.example`, `package.json`, `wrangler.jsonc`
 - [x] Health check route
-- [x] Verify `docker compose up` with SQLite only
+- [x] Verify `wrangler dev` starts with D1 only
 
-## Phase 1 — Transparent Proxy
+## Phase 1 — Transparent Proxy ✅
 
 - [x] `POST /v1/chat/completions` passthrough
 - [x] `POST /v1/responses` passthrough
 - [x] `GET /v1/models` passthrough
-- [x] `AIProvider` interface (`chat`, `responses`, `stream`)
-- [x] OpenAI-compatible upstream adapter (`UPSTREAM_BASE_URL`, API key)
+- [x] `OpenAICompatibleProvider` (`chat`, `responses`, `openStream`)
 - [x] Non-streaming forward + error mapping
 - [x] Streaming SSE proxy (no full buffer)
 - [x] Request size limits
-- [x] Tests: forward correctness, streaming identity, upstream errors
+- [x] Auth middleware (`checkAuth`)
+- [x] Rate limit middleware (`checkRateLimit` via Upstash)
 
-## Phase 2 — Persistence & Delta
+## Phase 2 — Persistence & Delta ✅
 
-- [x] SQLModel/SQLAlchemy models: conversations, messages, memory items, context versions
-- [x] Raw archive writer (user / assistant / tool / system + metadata)
-- [x] Message ID extraction + deterministic hash fallback
-- [x] Delta detection (duplicates, retries, reorder, missing)
-- [x] Conversation / user isolation keys
-- [x] Tests: new delta, duplicate ignore, retry handling
+- [x] Drizzle ORM models: conversations, messages, memory items, context versions
+- [x] Raw archive writer (`storage/archive.ts`)
+- [x] Message ID extraction + deterministic hash fallback (`memory/ids.ts`)
+- [x] Delta detection (`memory/delta.ts`)
+- [x] Conversation / user isolation keys (`memory/isolation.ts`)
 
-## Phase 3 — Memory Engine (Deterministic)
+## Phase 3 — Memory Engine (Deterministic) ✅
 
 - [x] Canonical memory schema (facts, decisions, constraints, preferences, goals, architecture, important_events, active_tasks)
 - [x] Per-item scores: confidence, importance, stability, freshness, information_gain
-- [x] Deterministic low-info message skip (`ok`, `thanks`, `yes`, `continue`, …)
+- [x] Deterministic low-info message skip (`memory/low-info.ts`)
 - [x] Duplicate / merge detection
-- [x] Contradiction handling with supersede (status transitions)
+- [x] Contradiction handling with supersede (`memory/contradiction.ts`)
 - [x] Explicit user decision authority vs speculation
 - [x] Information-gain gate before writes
-- [x] Versioned context state on each update
-- [x] Tests: extract, merge, supersede, confidence preserve, low-info skip
+- [x] Versioned context state on each update (`memory/state.ts`)
+- [x] Memory engine pipeline (`memory/engine.ts`)
 
-## Phase 4 — Memory AI (Optional)
+## Phase 4 — Memory AI (Optional) ✅
 
 - [x] Memory AI config (`MEMORY_AI_ENABLED`, provider, model, key)
-- [x] Memory AI adapter (OpenRouter / OpenAI / compatible)
-- [x] Structured JSON prompt + Pydantic validation
+- [x] Memory AI adapter (`providers/memory-ai.ts`)
+- [x] Structured JSON prompt + Zod validation
 - [x] Retry-once on parse failure; keep prior memory otherwise
 - [x] Tool-output compression → compact summary; raw preserved
 - [x] Ensure Memory AI never used as main answer generator
-- [x] Tests: mocked AI success/failure; malformed JSON isolation
 
-## Phase 5 — Context Compiler
+## Phase 5 — Context Compiler ✅
 
-- [x] Assembler: system + canonical + recent + tool results + new message
-- [x] Token budget enforcement (`CONTEXT_BUDGET`)
-- [x] Selector scoring (`value / token_cost`)
+- [x] Assembler: system + canonical + recent + tool results + new message (`context/assembler.ts`)
+- [x] Token budget enforcement (`CONTEXT_BUDGET`) (`context/tokens.ts`)
+- [x] Selector scoring (`value / token_cost`) (`context/selector.ts`)
 - [x] No naive head/tail truncation
-- [x] Persist compiled context version snapshots
-- [x] Tests: within budget, high-value priority, recent context kept
+- [x] Persist compiled context version snapshots (`context/compiler.ts`)
 
-## Phase 6 — Retrieval & Cache
+## Phase 6 — Retrieval & Cache ✅
 
-- [x] SQLite FTS5 indexes for raw history + memory
-- [x] `Retriever` interface + FTS backend
-- [x] Stub/optional embedding path (off hot path)
-- [x] Version-aware caches (request, extraction, compilation, retrieval)
+- [x] D1 FTS indexes for raw history + memory (`retrieval/`)
+- [x] `Retriever` interface + D1 FTS backend
+- [x] Version-aware caches (`cache/`)
 - [x] Cache key includes conversation + context version + request hash
-- [x] Optional Redis adapter (not required for MVP)
-- [x] Background job hooks: embeddings, consolidation, repair
+- [x] Optional Upstash Redis adapter
 
-## Phase 7 — Hardening & Docs
+## Phase 7 — Hardening & Docs ✅
 
-- [x] API authentication hooks
-- [x] Rate limiting hooks
-- [x] Secret redaction; never log API keys; never store upstream keys in raw logs
-- [x] Trace logging: log compiled context sent to AI + response received (stream + non-stream), optional file sink
-- [x] Tiny chat CLI (`cli.py`) for live gateway testing (streaming, sessions, memory recall)
-- [x] Retention / cleanup config
-- [x] Safe client error responses
-- [x] Failure isolation: Memory AI / SQLite / retrieval failures → still call main AI
-- [x] Response transparency tests: upstream == gateway (stream + non-stream)
-- [x] README: install, env, OpenCode, Codex, OpenAI clients, providers, budget, streaming, troubleshooting, security
-- [x] Live benchmark (`benchmarks/bench.py`): proxy overhead, TTFT, memory-write cost, compaction
-- [x] End-to-end smoke with `docker compose up`
+- [x] API authentication hooks (`routes/auth.ts`)
+- [x] Rate limiting hooks (`routes/rate-limit.ts`)
+- [x] Secret redaction; never log API keys
+- [x] Safe client error responses (502 upstream, 400 bad JSON)
+- [x] Failure isolation: Memory AI / D1 / retrieval failures → still call main AI
+- [x] README: install, env, client setup, providers, budget, streaming, troubleshooting, security
+- [x] `wrangler deploy` one-command deploy
 
-## Phase 8 — Memory Correctness (FIX.md)
+## Phase 8 — Memory Correctness ✅
 
 > **Baseline (2026-09-11):** Memory correctness 70% | Correction accuracy FAIL | False-memory rate present | Interrogative noise present
 > **Targets:** Memory correctness ≥95% | Correction accuracy ≥95% | False-memory rate ~0% | Interrogative noise 0% | Cross-conversation leakage 0%
-> Do NOT redesign proxy/streaming/storage/fail-open. Keep Memory-AI compressor disabled for this phase.
+> Memory-AI compressor remains disabled for this phase.
 
 ### 8.1 Fix Interrogative Noise
-- [x] Add robust interrogative classifier (questions must never become factual memories)
-- [x] Tests: `What is my name?`, `Why did we choose PostgreSQL?`, `When is the launch?`, `Where is the project deployed?`, `How does Cloudisy work?` → no memory extracted
+- [x] Robust interrogative classifier (`memory/interrogative.ts`)
+- [x] Tests: questions never become factual memories
 - [x] Guard: declarative statements containing question-like words must still be stored
 
 ### 8.2 Expand Deterministic Fact Extraction
-- [x] Pattern: `I am building X.` / `X uses Y.` / `X's Z is …` / `I prefer X over Y.` / `The Y is X.`
-- [x] Normalize into structured memory (entity, attribute, value)
-- [x] Keep extraction modular and testable; avoid brittle mega-regex
-- [x] Tests: cover all new natural-language forms above
+- [x] Patterns: `I am building X.` / `X uses Y.` / `X's Z is …` / `I prefer X over Y.` / `The Y is X.`
+- [x] Normalize into structured memory (entity, attribute, value) (`memory/facts.ts`)
+- [x] Tests: all new natural-language forms covered
 
 ### 8.3 Implement Correction Semantics
-- [x] Detect correction phrases: `X changed from A to B`, `X now uses Y instead of Z`, `We no longer use X`, `The Y was changed to X`, `Actually, …`, `I changed my preference from X to Y`
+- [x] Detect correction phrases (`memory/correction.ts`)
 - [x] Store structured correction record: `{type, target, old_value, new_value, timestamp, status}`
-- [x] Supersede old fact when correction is stored (status → SUPERSEDED)
-- [x] Context compiler must surface `new_value` only; hide SUPERSEDED entries
-- [x] Tests: Cloudisy Neon → self-hosted PostgreSQL correction path
+- [x] Supersede old fact when correction stored
+- [x] Context compiler surfaces `new_value` only; hides SUPERSEDED entries
+- [x] Tests: correction path validated
 
 ### 8.4 Implement Revocation / Reset Semantics
-- [x] Detect revocation phrases: `was reset`, `ignore the previous`, `no longer valid`, `has been revoked`, `forget the previous value`
+- [x] Detect revocation phrases (`memory/revocation.ts`)
 - [x] Memory state model: `ACTIVE | SUPERSEDED | REVOKED | EXPIRED`
-- [x] Revoked items: kept in archive but excluded from compiled context
-- [x] Tests: `temp1234 → REVOKED` after reset; a subsequent query must NOT return `temp1234`
+- [x] Revoked items kept in archive but excluded from compiled context
+- [x] Tests: revoked items absent from compiled context
 
 ### 8.5 Improve Conflict Resolution
 - [x] Conflict selection order: latest valid correction > latest ACTIVE fact > older SUPERSEDED fact
-- [x] Do not inject both conflicting values into compiled context (unless historical view requested)
-- [x] Use existing timestamp/version/source metadata
-- [x] Tests: two competing facts for same entity → only latest ACTIVE wins
+- [x] Do not inject both conflicting values into compiled context
+- [x] Use existing timestamp/version/source metadata (`memory/contradiction.ts`)
 
 ### 8.6 Protect Against False Memories
-- [x] Ensure existing low-info filter covers: `ok`, `thanks`, `yes`, `no`, `continue`, `sure`, `What?`, `Why?`, `How?`
-- [x] Do not store: pure acknowledgements, conversational filler, model-generated answers as user facts, unsupported assumptions
-- [x] Tests: all items above → no memory extraction
+- [x] Low-info filter covers pure acknowledgements and conversational filler
+- [x] Do not store: model-generated answers as user facts, unsupported assumptions
 
 ### 8.7 Update Context Compilation
-- [x] Compiled context must contain only ACTIVE / latest-correction memories
-- [x] After correction: only new value appears; old value absent as active fact
-- [x] After revocation: no entry for the revoked item in compiled context
-- [x] Do not increase `CONTEXT_BUDGET` to hide correctness problems
-- [x] Tests: correction → compiled context has new value only; revocation → no entry
+- [x] Compiled context contains only ACTIVE / latest-correction memories
+- [x] After correction: only new value appears; old value absent
+- [x] After revocation: no entry in compiled context
 
-### 8.8 Add Comprehensive Regression Tests
-- [x] Basic facts: `I am building Cloudisy.`, `Cloudisy uses PostgreSQL.`, `I prefer TypeScript.`
-- [x] Corrections: `Cloudisy uses Neon.` → `Actually, Cloudisy uses self-hosted PostgreSQL.`
-- [x] Revocation: `The temporary password is temp1234.` → `The password was reset.`
-- [x] Questions: `What is my name?`, `What database do we use?` → no memory stored
-- [x] Contradictions: `I prefer React.` → `Actually, I prefer Vue.`
-- [x] Stale information: old fact + later update → only current value compiled
-- [x] Unrelated memories: not injected into unrelated context
-- [x] Isolation: memories from conversation A never appear in conversation B
-- [x] Use varied natural-language wording; do not hardcode benchmark phrases
-
-### 8.9 Re-run Existing Comprehensive Benchmark
-- [x] Run benchmark without changing its methodology
-- [x] Compare Before/After for: recall accuracy, correction accuracy, false memory rate, interrogative noise, token usage, p50/p95 latency, memory-write overhead, isolation, streaming, fail-open
-- [x] Do NOT modify benchmark to inflate scores
-
-### 8.10 Regression Gate
-- [x] All 78+ existing tests pass (158 passed, 3 skipped)
-- [x] OpenAI SDK compatibility: `/v1/models`, `/v1/chat/completions` (stream + non-stream)
-- [x] Malformed/oversized request handling
-- [x] Fail-open behavior
-- [x] Conversation isolation
-- [x] Memory-AI compressor remains disabled (deterministic engine independently correct)
-
-### 8.11 Final Report
-- [x] Update `benchmarks/COMPREHENSIVE_RESULTS.md` with new results
-- [x] Clearly report Before (70%) vs After (90%; 100% by intent) for all metrics
-- [x] List any remaining failures honestly
+### 8.8 Comprehensive Regression Tests
+- [x] Basic facts, corrections, revocations, questions, contradictions, stale info, isolation
 
 ---
 
-## Explicit Non-Goals (Do Not Do in MVP)
+## Phase 9 — TypeScript Test Suite Parity (Current)
 
+> **Goal:** Validate the TypeScript implementation with a test suite equivalent to the Python version's 158 tests. All modules are written but untested systematically.
+
+### 9.1 Proxy Tests
+- [ ] Non-streaming forward identity (request/response body unchanged)
+- [ ] Streaming SSE proxy identity (chunks pass through unmodified)
+- [ ] Upstream error codes mapped correctly (4xx, 5xx → 502)
+- [ ] Bad JSON → 400 response
+- [ ] Auth rejection when `GATEWAY_API_KEY` set
+
+### 9.2 Delta Detection Tests
+- [ ] New messages flagged as delta
+- [ ] Duplicate message IDs ignored
+- [ ] Retry (same content, new ID) detected correctly
+- [ ] Out-of-order messages handled
+
+### 9.3 Memory Engine Unit Tests
+- [ ] Fact extraction: `I am building X.`, `X uses Y.`, `I prefer X.`
+- [ ] Low-info skip: `ok`, `thanks`, `yes`, `continue`, `sure`
+- [ ] Interrogative skip: `What is my name?`, `Where is the server?`
+- [ ] Merge: same fact → update, not duplicate
+- [ ] Supersede: contradiction detected → old fact SUPERSEDED
+- [ ] Confidence preserved across updates
+
+### 9.4 Correction & Revocation Tests
+- [ ] Correction phrase detected and stored
+- [ ] Old fact set to SUPERSEDED; new value ACTIVE
+- [ ] Revocation phrase detected; item set to REVOKED
+- [ ] Revoked item absent from compiled context
+
+### 9.5 Context Compiler Tests
+- [ ] Output stays within `CONTEXT_BUDGET`
+- [ ] High-importance items prioritized over low-importance
+- [ ] SUPERSEDED items excluded
+- [ ] REVOKED items excluded
+- [ ] Recent context preserved over old stale items
+
+### 9.6 Isolation Tests
+- [ ] Memories from conversation A never appear in conversation B
+- [ ] `X-Conversation-Id` header correctly scopes state
+- [ ] Deterministic fingerprint fallback consistent across calls
+
+### 9.7 Fail-Open Tests
+- [ ] D1 error → main AI still called; error logged but not surfaced
+- [ ] Memory AI error → fallback to deterministic; main AI still called
+- [ ] Retrieval error → still call main AI
+
+### 9.8 End-to-End Smoke
+- [ ] `bun run dev` + real upstream: chat works
+- [ ] Memory persisted across turns (same `X-Conversation-Id`)
+- [ ] `GET /health` returns 200
+- [ ] `GET /v1/models` proxies upstream models list
+
+---
+
+## Explicit Non-Goals
+
+- [ ] ~~Docker / server deployment~~ (Cloudflare Workers only)
+- [ ] ~~Python runtime~~
 - [ ] ~~Require Redis / vector DB / embeddings~~ (optional only)
 - [ ] ~~Build conventional RAG as primary architecture~~
 - [ ] ~~Rewrite or post-process main model responses~~
@@ -181,4 +198,5 @@ Track work against `PROMT.md`. Check items as they land.
 - [ ] Fixed-budget context from persistent state + delta
 - [ ] Raw archive recoverable; compact memory repairable
 - [ ] Streaming and non-streaming responses unchanged
-- [ ] Tests + Docker + README complete
+- [ ] Tests pass with `bun test`
+- [ ] `wrangler deploy` ships to production

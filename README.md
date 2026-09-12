@@ -6,7 +6,7 @@ their `base_url` — no SDKs, no MCP, no custom tools.
 ```
 Client ──▶ Gateway ──▶ Main AI (answers)
               │
-              └─▶ SQLite: raw archive + compact memory + compiled context
+              └─▶ Cloudflare D1: raw archive + compact memory + compiled context
 ```
 
 **How it works:** every request is archived, diffed against known history (delta
@@ -15,51 +15,63 @@ before reaching the main AI. The main AI always generates the answer; responses 
 returned **unchanged** (streaming and non-streaming). The gateway optimizes what goes
 *in*, never what comes *out*.
 
+**Stack:** TypeScript · Cloudflare Workers · Hono · Drizzle ORM · Cloudflare D1 · Upstash Redis (optional)
+
 ---
 
-## Install
+## Install & Run
 
-### Docker (recommended)
-
-```bash
-cd memory-gateway
-cp .env.example .env          # then edit UPSTREAM_API_KEY
-docker compose up --build -d
-curl http://localhost:8000/health
-```
-
-### Local (Python 3.12+)
+### Local development
 
 ```bash
-cd memory-gateway
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env          # then edit UPSTREAM_API_KEY
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+bun install
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars — set UPSTREAM_API_KEY at minimum
+
+bun run db:migrate:local   # apply D1 migrations locally
+bun run dev                # → wrangler dev → http://localhost:8787
+curl http://localhost:8787/health
 ```
 
 Run the test suite:
 
 ```bash
-pytest -q                     # 78 tests, no network needed
+bun test
+```
+
+### Deploy to Cloudflare
+
+```bash
+# Set secrets (never committed to source)
+wrangler secret put UPSTREAM_API_KEY
+wrangler secret put GATEWAY_API_KEY       # optional
+wrangler secret put UPSTASH_REDIS_REST_URL    # optional
+wrangler secret put UPSTASH_REDIS_REST_TOKEN  # optional
+wrangler secret put MEMORY_AI_API_KEY         # optional
+
+# Apply migrations to production D1
+bun run db:migrate:remote
+
+# Deploy the Worker
+bun run deploy
 ```
 
 ---
 
 ## Environment
 
-All variables live in `memory-gateway/.env` (see `.env.example`).
+Local secrets live in `.dev.vars` (never committed). Non-secret vars go in `wrangler.jsonc` under `"vars"`.
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `UPSTREAM_BASE_URL` | `https://api.openai.com/v1` | Main AI provider base URL |
-| `UPSTREAM_API_KEY` | — | **Required.** Key for the main AI |
-| `MEMORY_AI_ENABLED` | `false` | Optional AI compressor for memory |
-| `MEMORY_AI_BASE_URL` / `_MODEL` / `_API_KEY` | OpenRouter / `cheap-model` | Memory AI config |
-| `CONTEXT_BUDGET` | `8000` | Token budget for compiled context |
-| `SQLITE_PATH` | `./data/memory.db` | Raw archive + memory storage |
-| `GATEWAY_API_KEY` | unset | Optional bearer auth on the gateway (Phase 7 hook) |
-| `MAX_REQUEST_BYTES` | `2000000` | Request body size limit |
+| Variable | Default | Where | Purpose |
+|----------|---------|-------|---------|
+| `UPSTREAM_BASE_URL` | `https://api.openai.com/v1` | `wrangler.jsonc` | Main AI provider base URL |
+| `UPSTREAM_API_KEY` | — | **secret** | **Required.** Key for the main AI |
+| `MEMORY_AI_ENABLED` | `false` | `wrangler.jsonc` | Optional AI compressor for memory |
+| `MEMORY_AI_BASE_URL` / `_MODEL` / `_API_KEY` | — | jsonc / secret | Memory AI config |
+| `CONTEXT_BUDGET` | `8000` | `wrangler.jsonc` | Token budget for compiled context |
+| `GATEWAY_API_KEY` | unset | secret | Optional bearer auth on the gateway |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | unset | secret | Optional Redis cache + rate limiting |
+| `DB` | — | D1 binding | Raw archive + memory storage (managed by Cloudflare) |
 
 ### Providers
 
@@ -73,14 +85,39 @@ at it. The Memory AI compressor (optional) is configured separately and never an
 
 Set `base_url` to the gateway. Nothing else changes.
 
-### OpenAI client (Python)
+### OpenAI SDK (TypeScript)
+
+```typescript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8787/v1",
+  apiKey: "sk-anything",   // gateway key if GATEWAY_API_KEY is set
+  defaultHeaders: {
+    "X-Conversation-Id": "my-thread-42",
+  },
+});
+
+const r = await client.chat.completions.create({
+  model: "gpt-4.1",
+  messages: [{ role: "user", content: "My codename is Falcon-Nine." }],
+});
+```
+
+Next session, a bare question — *"What's my codename?"* — already knows. Memory is keyed
+per conversation via the `X-Conversation-Id` header.
+
+Without the header, the gateway derives a stable id from the first message of the thread.
+
+### OpenAI SDK (Python)
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="sk-anything",  # gateway key if GATEWAY_API_KEY is set
+    base_url="http://localhost:8787/v1",
+    api_key="sk-anything",
+    default_headers={"X-Conversation-Id": "my-thread-42"},
 )
 r = client.chat.completions.create(
     model="gpt-4.1",
@@ -88,21 +125,10 @@ r = client.chat.completions.create(
 )
 ```
 
-Next session, a bare question — *"What's my codename?"* — already knows. Memory is keyed
-per conversation: pass a stable header to keep turns in one thread:
-
-```http
-X-Conversation-Id: my-thread-42
-```
-
-Without it, the gateway derives a stable id from the first message of the thread.
-
 ### OpenCode / Codex / any OpenAI-compatible tool
 
-Provider settings:
-
 ```text
-base_url = http://localhost:8000/v1
+base_url = http://localhost:8787/v1
 api_key  = <GATEWAY_API_KEY or anything>
 model    = <upstream model name>
 ```
@@ -110,7 +136,7 @@ model    = <upstream model name>
 ### curl
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8787/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Conversation-Id: my-thread-42" \
   -d '{"model":"gpt-4.1","messages":[{"role":"user","content":"hi"}]}'
@@ -127,11 +153,13 @@ Full endpoint reference: [api.md](api.md).
 relevance) — never naive head/tail truncation. Each update persists a versioned context
 snapshot, so state is auditable and repairable.
 
+Override per-request with the `X-Context-Budget` header.
+
 ## Streaming
 
 `"stream": true` works transparently: SSE chunks are proxied to the client as they
-arrive (no full buffering); memory extraction runs after the stream completes.
-Responses are byte-identical to upstream.
+arrive (no full buffering); memory extraction runs after the stream completes via
+`waitUntil`. Responses are byte-identical to upstream.
 
 ---
 
@@ -139,67 +167,45 @@ Responses are byte-identical to upstream.
 
 | Symptom | Check |
 |---------|-------|
-| `502` / connection refused on chat | `UPSTREAM_BASE_URL` reachable? `UPSTREAM_API_KEY` set? See gateway logs |
+| `502` / connection refused on chat | `UPSTREAM_BASE_URL` reachable? `UPSTREAM_API_KEY` set? See Worker logs |
 | `model_not_found` | Model name must exist on the *upstream*, not the gateway — check `GET /v1/models` |
-| Memory not remembered | Reuse the same `X-Conversation-Id`; verify rows in `memory_items` (SQLite) |
-| `413` on upload | Body exceeds `MAX_REQUEST_BYTES` |
-| Health fails on boot | `SQLITE_PATH` writable? (Docker mounts the `gateway-data` volume) |
-| Want a fresh slate | Stop gateway, delete `data/memory.db`, restart |
+| Memory not remembered | Reuse the same `X-Conversation-Id`; verify rows in D1 via `bun run db:studio` |
+| `413` on upload | Body exceeds request size limit |
+| Health fails on boot | D1 binding configured? Run `bun run db:migrate:local` |
+| Want a fresh slate | Delete rows from D1 via Cloudflare dashboard or drop local `.wrangler/` state |
 
 ---
-
-## Benchmark
-
-A live benchmark compares the gateway against the upstream directly (proxy overhead,
-streaming latency, memory-write cost, and context compaction):
-
-```bash
-# gateway running on :8000, .env holds UPSTREAM_API_KEY
-cd memory-gateway
-python benchmarks/bench.py --runs 8
-```
-
-Measured live against a real upstream (Progga, `deepseek-v4-flash-0731`, 2026-09-11) —
-full report in [memory-gateway/benchmarks/RESULTS.md](memory-gateway/benchmarks/RESULTS.md):
-
-| Metric | Gateway | Direct | Delta |
-|---|---:|---:|---:|
-| Non-stream p50 latency | 625 ms | 635 ms | **−10 ms** |
-| Non-stream p95 latency | 804 ms | 1392 ms | −588 ms |
-| Stream time-to-first-token | 539 ms | 508 ms | +31 ms |
-| Memory-write turn (extract+persist) | 691 ms | 647 ms | +44 ms |
-| **Prompt tokens, 30-turn history** | **57** | 547 | **−90%** |
-
-Takeaways: the proxy adds ~zero overhead (p50 within noise), the full memory pipeline
-costs ~44 ms per turn, and the context compiler cut prompt tokens by **90%** on a long
-conversation — the core value proposition.
-
-## Security
-
-- Upstream API keys are server-side config only; never logged, never archived, never
-  echoed in errors.
-- Optional `GATEWAY_API_KEY` enables bearer auth for clients.
-- Conversation data is isolated per conversation/user key; raw history and compact
-  memory live in local SQLite under `data/`.
-- Request size limits guard against abuse; memory/SQLite/retrieval failures degrade
-  gracefully (the main AI is still called).
 
 ## Development
 
 ```text
-memory-gateway/
-├── app/
-│   ├── api/          # FastAPI routes (proxy, health)
-│   ├── providers/    # AIProvider adapters (OpenAI-compatible)
-│   ├── memory/       # delta detection, extraction, merge/supersede
-│   ├── context/      # fixed-budget compiler
-│   ├── storage/      # SQLModel + SQLite (+ FTS5)
-│   ├── retrieval/    # FTS retriever
-│   ├── cache/        # version-aware caches
-│   └── models/       # canonical schemas
-├── benchmarks/         # live benchmark: python benchmarks/bench.py
-├── tests/              # 78 offline tests
-└── Dockerfile / docker-compose.yml
+src/
+├── index.ts              # Hono app entry
+├── env.ts                # Env bindings interface
+├── routes/               # v1.ts, health.ts, auth.ts, rate-limit.ts
+├── providers/            # OpenAI-compatible adapter, Memory AI adapter
+├── memory/               # delta, engine, extractor, facts, correction, revocation,
+│                         # interrogative, low-info, scorer, contradiction, state, isolation
+├── context/              # compiler, assembler, selector, tokens
+├── storage/              # archive.ts (raw message writer)
+├── retrieval/            # FTS retriever interface + D1 backend
+├── cache/                # version-aware cache (Upstash Redis optional)
+├── models/               # Zod schemas + TypeScript types
+└── db/                   # Drizzle ORM setup
+
+drizzle/                  # Generated SQL migrations
+tests/                    # bun test suite
+wrangler.jsonc            # Cloudflare Workers config
 ```
 
 Design docs: [architecture.md](architecture.md), [PROMT.md](PROMT.md), [api.md](api.md).
+
+## Security
+
+- Upstream API keys are Wrangler secrets only; never logged, never archived, never
+  echoed in errors.
+- Optional `GATEWAY_API_KEY` enables bearer auth for clients.
+- Conversation data is isolated per conversation/user key; raw history and compact
+  memory live in Cloudflare D1.
+- Rate limiting via Upstash Ratelimit guards against abuse; memory/D1/retrieval failures
+  degrade gracefully (the main AI is still called).

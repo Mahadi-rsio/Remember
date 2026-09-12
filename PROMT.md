@@ -1,4 +1,4 @@
-Build a production-oriented AI Memory Gateway / Context Compression Proxy in Python.
+Build a production-oriented AI Memory Gateway / Context Compression Proxy in TypeScript on Cloudflare Workers.
 
 The gateway sits transparently between AI clients such as OpenCode, Codex, or other OpenAI-compatible agents and the real upstream AI API.
 
@@ -764,18 +764,16 @@ Never store upstream API keys in raw conversation logs.
 
 Use:
 
-Python
-FastAPI
-httpx
-asyncio
-SQLite
-SQLite FTS5
-Pydantic
-SQLAlchemy or SQLModel
+TypeScript
+Cloudflare Workers
+Hono
+Drizzle ORM
+Cloudflare D1 (SQLite-compatible)
+Bun (package manager + test runner)
 
 Optional:
 
-Redis
+Upstash Redis (caching + rate limiting)
 Embeddings
 Vector database
 Cheap LLM API
@@ -788,32 +786,49 @@ Do not make optional components mandatory for the MVP.
 
 Create a clean modular project such as:
 
-memory-gateway/
-├── app/
-│   ├── api/
-│   ├── providers/
-│   ├── memory/
-│   │   ├── extractor.py
-│   │   ├── compressor.py
-│   │   ├── scorer.py
-│   │   ├── contradiction.py
-│   │   ├── delta.py
-│   │   └── state.py
-│   ├── context/
-│   │   ├── compiler.py
-│   │   ├── budget.py
-│   │   └── selector.py
-│   ├── storage/
-│   ├── retrieval/
-│   ├── cache/
-│   ├── models/
-│   └── main.py
-├── tests/
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── requirements.txt
-└── README.md
+src/
+├── index.ts
+├── env.ts
+├── routes/
+│   ├── v1.ts
+│   ├── health.ts
+│   ├── auth.ts
+│   └── rate-limit.ts
+├── providers/
+│   ├── openai-compatible.ts
+│   └── memory-ai.ts
+├── memory/
+│   ├── extractor.ts
+│   ├── compressor.ts
+│   ├── scorer.ts
+│   ├── contradiction.ts
+│   ├── correction.ts
+│   ├── revocation.ts
+│   ├── interrogative.ts
+│   ├── low-info.ts
+│   ├── facts.ts
+│   ├── delta.ts
+│   ├── engine.ts
+│   ├── state.ts
+│   ├── ids.ts
+│   └── isolation.ts
+├── context/
+│   ├── compiler.ts
+│   ├── assembler.ts
+│   ├── selector.ts
+│   └── tokens.ts
+├── storage/
+│   └── archive.ts
+├── retrieval/
+├── cache/
+├── models/
+└── db/
+
+drizzle/
+tests/
+wrangler.jsonc
+.dev.vars.example
+package.json
 
 Keep the architecture modular and easy to replace.
 
@@ -871,21 +886,20 @@ The memory system must not modify the response.
 
 ---
 
-27. Docker
+27. Deployment
 
-Provide:
+The MVP runs on Cloudflare Workers. Provide:
 
-Dockerfile
-docker-compose.yml
-.env.example
+wrangler.jsonc
+.dev.vars.example
 
-The MVP should run with:
+Local development:
 
-docker compose up
+bun run dev
 
 without requiring Redis, vector DB, or another external service.
 
-SQLite should work immediately.
+Cloudflare D1 (SQLite-compatible) works immediately via the local wrangler D1 emulation.
 
 ---
 
@@ -948,11 +962,11 @@ Do not build a toy summarization proxy.
 
 Build the actual working MVP with:
 
-- FastAPI
+- Hono + Cloudflare Workers
 - OpenAI-compatible proxy
 - mandatory upstream/main AI forwarding
 - optional cheap memory AI
-- persistent SQLite memory
+- persistent Cloudflare D1 memory
 - raw message archive
 - delta detection
 - structured compact memory
@@ -960,15 +974,14 @@ Build the actual working MVP with:
 - contradiction handling
 - information-gain detection
 - fixed-token context compiler
-- SQLite FTS5 retrieval
+- D1 FTS retrieval
 - optional embedding/vector interface
 - versioned context state
-- caching
+- caching (Upstash Redis optional)
 - streaming proxy
 - failure isolation
 - authentication hooks
-- tests
-- Docker
+- tests (`bun test`)
 - documentation
 
 Most importantly:
