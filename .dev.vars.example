@@ -1,29 +1,30 @@
-# Turso / libSQL (required for persistence)
-# Create a DB: https://turso.tech — or `turso db create memory-gateway`
-# Then: turso db show memory-gateway --url
-#       turso db tokens create memory-gateway
+# Turso / libSQL (required for memory persistence)
+# Create a DB: https://turso.tech — or:
+#   turso db create memory-gateway
+#   turso db show memory-gateway --url
+#   turso db tokens create memory-gateway
 TURSO_DATABASE_URL=libsql://your-db-name-org.turso.io
 TURSO_AUTH_TOKEN=your-turso-auth-token
 
-# Upstash Redis
-UPSTASH_REDIS_REST_URL=https://your-upstash-redis.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your-upstash-token
-
-# Upstream Main AI Credentials
+# Upstream Main AI (required for chat)
 UPSTREAM_PROVIDER=openai
 UPSTREAM_BASE_URL=https://api.openai.com/v1
 UPSTREAM_API_KEY=your-openai-api-key
 
-# Gateway Auth (Optional; client -> gateway)
+# Gateway Auth (optional; client → gateway bearer token)
 # GATEWAY_API_KEY=your-gateway-api-key
 
-# Optional Memory AI Compressor
-MEMORY_AI_ENABLED=false
-MEMORY_AI_PROVIDER=openrouter
-MEMORY_AI_BASE_URL=https://openrouter.ai/api/v1
-MEMORY_AI_MODEL=cheap-model
-MEMORY_AI_API_KEY=
+# Upstash Redis (optional — cache + rate limiting)
+# UPSTASH_REDIS_REST_URL=https://your-upstash-redis.upstash.io
+# UPSTASH_REDIS_REST_TOKEN=your-upstash-token
 
-# Context Budget
+# Optional Memory AI compressor (keep false until needed)
+MEMORY_AI_ENABLED=false
+# MEMORY_AI_PROVIDER=openrouter
+# MEMORY_AI_BASE_URL=https://openrouter.ai/api/v1
+# MEMORY_AI_MODEL=cheap-model
+# MEMORY_AI_API_KEY=
+
+# Context + logging
 CONTEXT_BUDGET=8000
 LOG_LEVEL=info
