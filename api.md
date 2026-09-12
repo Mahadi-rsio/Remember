@@ -155,7 +155,7 @@ Compiled context sent upstream should be ≤ this token budget. Selection is sco
 ## Error Behavior
 
 - Upstream errors: proxied to the client with safe handling; upstream status/body preserved where appropriate.
-- Memory / D1 / retrieval / Memory AI failures: **fallback** to previous canonical memory + recent messages; main AI still called.
+- Memory / Turso / retrieval / Memory AI failures: **fallback** to previous canonical memory + recent messages; main AI still called.
 - Malformed Memory AI output: retry once if configured; otherwise leave memory unchanged.
 
 Memory failures must not break the main completion path.

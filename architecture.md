@@ -10,7 +10,7 @@ The Memory Gateway is a **stateful context transformation layer**, not a chatbot
 |-----------|-----------|
 | Runtime | Cloudflare Workers |
 | Framework | Hono |
-| Database | Cloudflare D1 (SQLite-compatible) |
+| Database | Turso (libSQL / SQLite-compatible) |
 | ORM | Drizzle ORM |
 | Cache | Upstash Redis (optional) |
 | Language | TypeScript |
@@ -69,7 +69,7 @@ Preferred critical path — keep it lightweight:
 1. Receive OpenAI-compatible request
 2. Authenticate / isolate conversation (`X-Conversation-Id` header or fingerprint)
 3. Identify **delta** vs already-processed messages
-4. Persist raw messages to D1 archive (via `waitUntil` — non-blocking)
+4. Persist raw messages to Turso archive (via `waitUntil` — non-blocking)
 5. Load current versioned canonical memory
 6. Deterministic memory processing
 7. Call Memory AI **only when necessary**
@@ -85,7 +85,7 @@ Expensive work (embeddings, deep consolidation, archival indexing, memory repair
 ```
 src/
 ├── index.ts              # Hono app entry, middleware
-├── env.ts                # Env bindings interface (D1, Upstash, vars)
+├── env.ts                # Env bindings interface (Turso, Upstash, vars)
 ├── routes/
 │   ├── v1.ts             # OpenAI-compatible HTTP routes
 │   ├── health.ts         # Health check routes
@@ -116,10 +116,10 @@ src/
 │   └── tokens.ts         # Token counting utilities
 ├── storage/
 │   └── archive.ts        # Raw message archive writer
-├── retrieval/            # FTS retriever interface + D1 backend
+├── retrieval/            # Retriever interface + SQLite/libSQL backend
 ├── cache/                # Version-aware cache (Upstash Redis optional)
 ├── models/               # Zod schemas + TypeScript types
-└── db/                   # Drizzle ORM setup + D1 client
+└── db/                   # Drizzle ORM setup + Turso/libSQL client
 
 drizzle/                  # Generated SQL migrations
 tests/                    # Bun test suite
@@ -190,7 +190,7 @@ Combines, under `CONTEXT_BUDGET`:
 
 Selection score ≈ `value / token_cost`, where value includes relevance, confidence, importance, freshness, stability, and information gain. No naive truncation.
 
-### Storage (Cloudflare D1)
+### Storage (Turso / libSQL)
 
 Three memory layers:
 
@@ -202,8 +202,7 @@ Every canonical update creates a new **context version** (`conversation_id`, `ve
 
 Schema managed by **Drizzle ORM**; migrations in `drizzle/`. Apply with:
 ```bash
-bun run db:migrate:local   # local D1
-bun run db:migrate:remote  # production D1
+bun run db:migrate   # applies to TURSO_DATABASE_URL
 ```
 
 ### Retrieval
@@ -214,13 +213,13 @@ interface Retriever {
 }
 ```
 
-- MVP backend: D1 FTS (SQLite-compatible).
-- Future: pgvector, Qdrant, Weaviate.
+- MVP backend: SQLite/libSQL LIKE search (portable on Turso).
+- Future: FTS5, pgvector, Qdrant, Weaviate.
 - Embeddings optional; use only when semantic retrieval is needed.
 
 ### Cache
 
-Optional Upstash Redis; D1 sufficient for v1.
+Optional Upstash Redis; Turso sufficient for v1.
 
 Layers: request, memory extraction, context compilation, retrieval.
 
@@ -274,7 +273,7 @@ Memory AI must **not** generate the user's final answer.
 | Failure | Fallback |
 |---------|----------|
 | Memory AI down / bad JSON | Previous canonical memory + recent messages |
-| D1 / retrieval error | Best-effort recent messages → still call main AI |
+| Turso / retrieval error | Best-effort recent messages → still call main AI |
 | Upstash Redis miss | Skip cache; continue |
 | `waitUntil` task failure | Silently discarded; main response already sent |
 
@@ -290,7 +289,7 @@ For `"stream": true`, proxy upstream SSE chunks directly via `Response` with str
 - Per-user / conversation isolation (`X-Conversation-Id` or fingerprint)
 - Request size limits (`MAX_REQUEST_BYTES`)
 - Rate limiting via Upstash Ratelimit
-- Secret redaction; no API-key logging; upstream keys never in D1 archive
+- Secret redaction; no API-key logging; upstream keys never in Turso archive
 - Configurable retention
 
 ## Configuration Surface
@@ -302,7 +301,7 @@ For `"stream": true`, proxy upstream SSE chunks directly via `Response` with str
 | `CONTEXT_BUDGET` | Token budget for compiled context |
 | `GATEWAY_API_KEY` | Optional client→gateway bearer auth |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Optional Redis cache + rate limiting |
-| D1 binding `DB` | Persistence (managed by Cloudflare) |
+| `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` | Persistence (Turso / libSQL) |
 
 ## What This Is Not
 

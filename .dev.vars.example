@@ -1,5 +1,9 @@
-# Cloudflare D1 is bound automatically in local dev via wrangler.
-# (To apply migrations locally: bun run db:migrate:local)
+# Turso / libSQL (required for persistence)
+# Create a DB: https://turso.tech — or `turso db create memory-gateway`
+# Then: turso db show memory-gateway --url
+#       turso db tokens create memory-gateway
+TURSO_DATABASE_URL=libsql://your-db-name-org.turso.io
+TURSO_AUTH_TOKEN=your-turso-auth-token
 
 # Upstash Redis
 UPSTASH_REDIS_REST_URL=https://your-upstash-redis.upstash.io

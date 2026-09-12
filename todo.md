@@ -169,7 +169,7 @@ Track work against `plan.md`. Check items as they land.
 - [ ] Deterministic fingerprint fallback consistent across calls
 
 ### 9.7 Fail-Open Tests
-- [ ] D1 error → main AI still called; error logged but not surfaced
+- [ ] Turso error → main AI still called; error logged but not surfaced
 - [ ] Memory AI error → fallback to deterministic; main AI still called
 - [ ] Retrieval error → still call main AI
 

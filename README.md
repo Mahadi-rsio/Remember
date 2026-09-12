@@ -6,7 +6,7 @@ their `base_url` — no SDKs, no MCP, no custom tools.
 ```
 Client ──▶ Gateway ──▶ Main AI (answers)
               │
-              └─▶ Cloudflare D1: raw archive + compact memory + compiled context
+              └─▶ Turso (libSQL): raw archive + compact memory + compiled context
 ```
 
 **How it works:** every request is archived, diffed against known history (delta
@@ -15,7 +15,7 @@ before reaching the main AI. The main AI always generates the answer; responses 
 returned **unchanged** (streaming and non-streaming). The gateway optimizes what goes
 *in*, never what comes *out*.
 
-**Stack:** TypeScript · Cloudflare Workers · Hono · Drizzle ORM · Cloudflare D1 · Upstash Redis (optional)
+**Stack:** TypeScript · Cloudflare Workers · Hono · Drizzle ORM · Turso (libSQL) · Upstash Redis (optional)
 
 ---
 
@@ -26,11 +26,19 @@ returned **unchanged** (streaming and non-streaming). The gateway optimizes what
 ```bash
 bun install
 cp .dev.vars.example .dev.vars
-# Edit .dev.vars — set UPSTREAM_API_KEY at minimum
+# Edit .dev.vars — set UPSTREAM_API_KEY + TURSO_DATABASE_URL + TURSO_AUTH_TOKEN
 
-bun run db:migrate:local   # apply D1 migrations locally
+bun run db:migrate         # apply migrations to Turso
 bun run dev                # → wrangler dev → http://localhost:8787
 curl http://localhost:8787/health
+```
+
+Create a Turso database if you do not have one yet:
+
+```bash
+turso db create memory-gateway
+turso db show memory-gateway --url
+turso db tokens create memory-gateway
 ```
 
 Run the test suite:
@@ -44,13 +52,15 @@ bun test
 ```bash
 # Set secrets (never committed to source)
 wrangler secret put UPSTREAM_API_KEY
+wrangler secret put TURSO_DATABASE_URL
+wrangler secret put TURSO_AUTH_TOKEN
 wrangler secret put GATEWAY_API_KEY       # optional
 wrangler secret put UPSTASH_REDIS_REST_URL    # optional
 wrangler secret put UPSTASH_REDIS_REST_TOKEN  # optional
 wrangler secret put MEMORY_AI_API_KEY         # optional
 
-# Apply migrations to production D1
-bun run db:migrate:remote
+# Apply migrations to Turso
+bun run db:migrate
 
 # Deploy the Worker
 bun run deploy
@@ -64,6 +74,8 @@ Local secrets live in `.dev.vars` (never committed). Non-secret vars go in `wran
 
 | Variable | Default | Where | Purpose |
 |----------|---------|-------|---------|
+| `TURSO_DATABASE_URL` | — | **secret** / `.dev.vars` | **Required for memory.** Turso/libSQL database URL |
+| `TURSO_AUTH_TOKEN` | — | **secret** / `.dev.vars` | Turso auth token |
 | `UPSTREAM_BASE_URL` | `https://api.openai.com/v1` | `wrangler.jsonc` | Main AI provider base URL |
 | `UPSTREAM_API_KEY` | — | **secret** | **Required.** Key for the main AI |
 | `MEMORY_AI_ENABLED` | `false` | `wrangler.jsonc` | Optional AI compressor for memory |
@@ -71,7 +83,6 @@ Local secrets live in `.dev.vars` (never committed). Non-secret vars go in `wran
 | `CONTEXT_BUDGET` | `8000` | `wrangler.jsonc` | Token budget for compiled context |
 | `GATEWAY_API_KEY` | unset | secret | Optional bearer auth on the gateway |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | unset | secret | Optional Redis cache + rate limiting |
-| `DB` | — | D1 binding | Raw archive + memory storage (managed by Cloudflare) |
 
 ### Providers
 
@@ -169,10 +180,10 @@ arrive (no full buffering); memory extraction runs after the stream completes vi
 |---------|-------|
 | `502` / connection refused on chat | `UPSTREAM_BASE_URL` reachable? `UPSTREAM_API_KEY` set? See Worker logs |
 | `model_not_found` | Model name must exist on the *upstream*, not the gateway — check `GET /v1/models` |
-| Memory not remembered | Reuse the same `X-Conversation-Id`; verify rows in D1 via `bun run db:studio` |
+| Memory not remembered | Reuse the same `X-Conversation-Id`; verify rows via `bun run db:studio` |
 | `413` on upload | Body exceeds request size limit |
-| Health fails on boot | D1 binding configured? Run `bun run db:migrate:local` |
-| Want a fresh slate | Delete rows from D1 via Cloudflare dashboard or drop local `.wrangler/` state |
+| Health fails on boot | `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` set? Run `bun run db:migrate` |
+| Want a fresh slate | Drop/recreate the Turso DB or truncate tables via `bun run db:studio` |
 
 ---
 
@@ -188,12 +199,13 @@ src/
 │                         # interrogative, low-info, scorer, contradiction, state, isolation
 ├── context/              # compiler, assembler, selector, tokens
 ├── storage/              # archive.ts (raw message writer)
-├── retrieval/            # FTS retriever interface + D1 backend
+├── retrieval/            # Retriever interface + SQLite/libSQL backend
 ├── cache/                # version-aware cache (Upstash Redis optional)
 ├── models/               # Zod schemas + TypeScript types
-└── db/                   # Drizzle ORM setup
+└── db/                   # Drizzle ORM + Turso/libSQL client
 
 drizzle/                  # Generated SQL migrations
+scripts/migrate.ts        # Apply migrations to Turso
 tests/                    # bun test suite
 wrangler.jsonc            # Cloudflare Workers config
 ```
@@ -206,6 +218,6 @@ Design docs: [architecture.md](architecture.md), [PROMT.md](PROMT.md), [api.md](
   echoed in errors.
 - Optional `GATEWAY_API_KEY` enables bearer auth for clients.
 - Conversation data is isolated per conversation/user key; raw history and compact
-  memory live in Cloudflare D1.
-- Rate limiting via Upstash Ratelimit guards against abuse; memory/D1/retrieval failures
+  memory live in Turso (libSQL).
+- Rate limiting via Upstash Ratelimit guards against abuse; memory/Turso/retrieval failures
   degrade gracefully (the main AI is still called).

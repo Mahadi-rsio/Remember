@@ -1,6 +1,6 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "turso",
   "entries": [
     {
       "idx": 0,

@@ -5,7 +5,8 @@ import { memoryItems } from "../db/schema/memory";
 import { MemoryStatus } from "../models/memory";
 import type { Retriever, RetrievalResult } from "./interface";
 
-export class D1Retriever implements Retriever {
+/** SQLite/libSQL LIKE-based retriever (portable across Turso and local SQLite). */
+export class SqliteRetriever implements Retriever {
   constructor(private db: Database) {}
 
   async searchMessages(
@@ -74,3 +75,6 @@ export class D1Retriever implements Retriever {
     }
   }
 }
+
+/** @deprecated Use SqliteRetriever */
+export const D1Retriever = SqliteRetriever;

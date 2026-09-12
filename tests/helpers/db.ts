@@ -20,7 +20,7 @@ function applyMigration(sqlite: Database): void {
 }
 
 /**
- * Creates a real in-memory SQLite database with the production D1 schema
+ * Creates a real in-memory SQLite database with the production schema
  * applied, wrapped in a Drizzle instance compatible with the memory engine.
  * Each call returns an isolated, fully-writable database.
  */
