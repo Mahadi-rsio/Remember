@@ -4,7 +4,7 @@ import { messages as messagesTable } from "../db/schema/messages";
 import { type NormalizedMessage, normalizeMessages } from "./ids";
 
 export interface DeltaResult {
-  conversationId: string;
+  userId: string;
   userKey: string | null;
   allMessages: NormalizedMessage[];
   newMessages: NormalizedMessage[];
@@ -14,24 +14,24 @@ export interface DeltaResult {
 
 export async function loadProcessedKeys(
   db: Database,
-  conversationId: string
+  userId: string
 ): Promise<Set<string>> {
   const rows = await db
     .select({ messageKey: messagesTable.messageKey })
     .from(messagesTable)
-    .where(eq(messagesTable.conversationId, conversationId));
+    .where(eq(messagesTable.userId, userId));
 
   return new Set(rows.map((r) => r.messageKey));
 }
 
 export async function detectDelta(
   db: Database,
-  conversationId: string,
+  userId: string,
   userKey: string | null,
   messages: Array<Record<string, any>>
 ): Promise<DeltaResult> {
   const normalized = normalizeMessages(messages);
-  const processed = await loadProcessedKeys(db, conversationId);
+  const processed = await loadProcessedKeys(db, userId);
 
   const newMessages: NormalizedMessage[] = [];
   const duplicates: NormalizedMessage[] = [];
@@ -52,7 +52,7 @@ export async function detectDelta(
   }
 
   return {
-    conversationId,
+    userId,
     userKey,
     allMessages: normalized,
     newMessages,

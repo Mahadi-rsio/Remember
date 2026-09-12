@@ -1,14 +1,14 @@
 import { pgTable, varchar, text, timestamp, serial, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { conversations } from "./conversations";
+import { users } from "./users";
 
 export const corrections = pgTable(
   "corrections",
   {
     id: serial("id").primaryKey(),
-    conversationId: varchar("conversation_id", { length: 128 })
+    userId: varchar("user_id", { length: 128 })
       .notNull()
-      .references(() => conversations.id),
+      .references(() => users.userId),
     target: varchar("target", { length: 256 }).notNull().default(""),
     oldValue: varchar("old_value", { length: 1024 }).notNull().default(""),
     newValue: varchar("new_value", { length: 1024 }).notNull().default(""),
@@ -19,7 +19,7 @@ export const corrections = pgTable(
       .default(sql`now()`),
   },
   (table) => [
-    index("idx_corrections_conversation_id").on(table.conversationId),
+    index("idx_corrections_user_id").on(table.userId),
   ]
 );
 

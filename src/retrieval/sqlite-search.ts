@@ -11,7 +11,7 @@ export class SqliteRetriever implements Retriever {
 
   async searchMessages(
     query: string,
-    conversationId: string,
+    userId: string,
     limit = 10
   ): Promise<RetrievalResult[]> {
     if (!query.trim()) return [];
@@ -22,7 +22,7 @@ export class SqliteRetriever implements Retriever {
         .from(messages)
         .where(
           and(
-            eq(messages.conversationId, conversationId),
+            eq(messages.userId, userId),
             like(messages.content, pattern)
           )
         )
@@ -33,7 +33,7 @@ export class SqliteRetriever implements Retriever {
         rowId: r.id,
         content: r.content,
         role: r.role,
-        conversationId: r.conversationId,
+        userId: r.userId,
         score: 1.0,
       }));
     } catch {
@@ -43,7 +43,7 @@ export class SqliteRetriever implements Retriever {
 
   async searchMemory(
     query: string,
-    conversationId: string,
+    userId: string,
     limit = 10
   ): Promise<RetrievalResult[]> {
     if (!query.trim()) return [];
@@ -54,7 +54,7 @@ export class SqliteRetriever implements Retriever {
         .from(memoryItems)
         .where(
           and(
-            eq(memoryItems.conversationId, conversationId),
+            eq(memoryItems.userId, userId),
             eq(memoryItems.status, MemoryStatus.ACTIVE),
             like(memoryItems.content, pattern)
           )
@@ -67,7 +67,7 @@ export class SqliteRetriever implements Retriever {
         content: r.content,
         itemType: r.type,
         topicKey: r.topicKey,
-        conversationId: r.conversationId,
+        userId: r.userId,
         score: 1.0,
       }));
     } catch {

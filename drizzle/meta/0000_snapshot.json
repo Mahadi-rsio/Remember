@@ -1,24 +1,24 @@
 {
-  "id": "e489813b-1533-45b5-8701-09c69ca23b8c",
+  "id": "311da5a5-9c27-44f6-8856-c8ef41f078f4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.conversations": {
-      "name": "conversations",
+    "public.users": {
+      "name": "users",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
+        "user_id": {
+          "name": "user_id",
           "type": "varchar(128)",
           "primaryKey": true,
           "notNull": true
         },
-        "user_key": {
-          "name": "user_key",
-          "type": "varchar(128)",
+        "api_key": {
+          "name": "api_key",
+          "type": "varchar(256)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -26,38 +26,9 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "metadata_json": {
-          "name": "metadata_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
-      "indexes": {
-        "idx_conversations_user_key": {
-          "name": "idx_conversations_user_key",
-          "columns": [
-            {
-              "expression": "user_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -75,8 +46,8 @@
           "primaryKey": true,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
+        "user_id": {
+          "name": "user_id",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true
@@ -133,11 +104,11 @@
         }
       },
       "indexes": {
-        "idx_messages_conversation_id": {
-          "name": "idx_messages_conversation_id",
+        "idx_messages_user_id": {
+          "name": "idx_messages_user_id",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -163,11 +134,11 @@
           "method": "btree",
           "with": {}
         },
-        "uq_conv_message_key": {
-          "name": "uq_conv_message_key",
+        "uq_user_message_key": {
+          "name": "uq_user_message_key",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -186,15 +157,15 @@
         }
       },
       "foreignKeys": {
-        "messages_conversation_id_conversations_id_fk": {
-          "name": "messages_conversation_id_conversations_id_fk",
+        "messages_user_id_users_user_id_fk": {
+          "name": "messages_user_id_users_user_id_fk",
           "tableFrom": "messages",
-          "tableTo": "conversations",
+          "tableTo": "users",
           "columnsFrom": [
-            "conversation_id"
+            "user_id"
           ],
           "columnsTo": [
-            "id"
+            "user_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -216,8 +187,8 @@
           "primaryKey": true,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
+        "user_id": {
+          "name": "user_id",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true
@@ -313,11 +284,11 @@
         }
       },
       "indexes": {
-        "idx_memory_items_conversation_id": {
-          "name": "idx_memory_items_conversation_id",
+        "idx_memory_items_user_id": {
+          "name": "idx_memory_items_user_id",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -375,15 +346,15 @@
         }
       },
       "foreignKeys": {
-        "memory_items_conversation_id_conversations_id_fk": {
-          "name": "memory_items_conversation_id_conversations_id_fk",
+        "memory_items_user_id_users_user_id_fk": {
+          "name": "memory_items_user_id_users_user_id_fk",
           "tableFrom": "memory_items",
-          "tableTo": "conversations",
+          "tableTo": "users",
           "columnsFrom": [
-            "conversation_id"
+            "user_id"
           ],
           "columnsTo": [
-            "id"
+            "user_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -405,8 +376,8 @@
           "primaryKey": true,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
+        "user_id": {
+          "name": "user_id",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true
@@ -455,11 +426,11 @@
         }
       },
       "indexes": {
-        "idx_corrections_conversation_id": {
-          "name": "idx_corrections_conversation_id",
+        "idx_corrections_user_id": {
+          "name": "idx_corrections_user_id",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -472,15 +443,15 @@
         }
       },
       "foreignKeys": {
-        "corrections_conversation_id_conversations_id_fk": {
-          "name": "corrections_conversation_id_conversations_id_fk",
+        "corrections_user_id_users_user_id_fk": {
+          "name": "corrections_user_id_users_user_id_fk",
           "tableFrom": "corrections",
-          "tableTo": "conversations",
+          "tableTo": "users",
           "columnsFrom": [
-            "conversation_id"
+            "user_id"
           ],
           "columnsTo": [
-            "id"
+            "user_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -502,8 +473,8 @@
           "primaryKey": true,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
+        "user_id": {
+          "name": "user_id",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true
@@ -538,11 +509,11 @@
         }
       },
       "indexes": {
-        "idx_context_versions_conversation_id": {
-          "name": "idx_context_versions_conversation_id",
+        "idx_context_versions_user_id": {
+          "name": "idx_context_versions_user_id",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -553,11 +524,11 @@
           "method": "btree",
           "with": {}
         },
-        "uq_conv_context_version": {
-          "name": "uq_conv_context_version",
+        "uq_user_context_version": {
+          "name": "uq_user_context_version",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -576,15 +547,15 @@
         }
       },
       "foreignKeys": {
-        "context_versions_conversation_id_conversations_id_fk": {
-          "name": "context_versions_conversation_id_conversations_id_fk",
+        "context_versions_user_id_users_user_id_fk": {
+          "name": "context_versions_user_id_users_user_id_fk",
           "tableFrom": "context_versions",
-          "tableTo": "conversations",
+          "tableTo": "users",
           "columnsFrom": [
-            "conversation_id"
+            "user_id"
           ],
           "columnsTo": [
-            "id"
+            "user_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"

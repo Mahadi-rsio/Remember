@@ -16,7 +16,7 @@ import {
 
 export async function listMemoryItems(
   db: Database,
-  conversationId: string,
+  userId: string,
   status: string | null = MemoryStatus.ACTIVE
 ): Promise<MemoryItem[]> {
   if (status !== null) {
@@ -25,7 +25,7 @@ export async function listMemoryItems(
       .from(memoryItems)
       .where(
         and(
-          eq(memoryItems.conversationId, conversationId),
+          eq(memoryItems.userId, userId),
           eq(memoryItems.status, status)
         )
       );
@@ -33,7 +33,7 @@ export async function listMemoryItems(
   return await db
     .select()
     .from(memoryItems)
-    .where(eq(memoryItems.conversationId, conversationId));
+    .where(eq(memoryItems.userId, userId));
 }
 
 export function resolveActiveConflicts(items: MemoryItem[]): MemoryItem[] {
@@ -64,12 +64,12 @@ export function resolveActiveConflicts(items: MemoryItem[]): MemoryItem[] {
 
 export async function latestContextVersion(
   db: Database,
-  conversationId: string
+  userId: string
 ): Promise<number> {
   const rows = await db
     .select({ version: contextVersions.version })
     .from(contextVersions)
-    .where(eq(contextVersions.conversationId, conversationId))
+    .where(eq(contextVersions.userId, userId))
     .orderBy(desc(contextVersions.version))
     .limit(1);
 
@@ -78,19 +78,19 @@ export async function latestContextVersion(
 
 export async function persistCandidates(
   db: Database,
-  conversationId: string,
+  userId: string,
   candidates: CandidateMemory[]
 ): Promise<ApplyResult[]> {
   const results: ApplyResult[] = [];
-  let active = await loadActiveItems(db, conversationId);
+  let active = await loadActiveItems(db, userId);
 
   for (const candidate of candidates) {
-    const result = await applyCandidate(db, conversationId, candidate, active);
+    const result = await applyCandidate(db, userId, candidate, active);
     results.push(result);
 
     if (result.correction && result.action === "supersede" && result.item) {
       await db.insert(corrections).values({
-        conversationId,
+        userId,
         target: result.correction.target,
         oldValue: result.correction.oldValue,
         newValue: result.correction.newValue,
@@ -116,15 +116,15 @@ export async function persistCandidates(
 
 export async function writeContextVersion(
   db: Database,
-  conversationId: string,
+  userId: string,
   sourceMessageIds: string[]
 ): Promise<number> {
-  const active = await listMemoryItems(db, conversationId, MemoryStatus.ACTIVE);
+  const active = await listMemoryItems(db, userId, MemoryStatus.ACTIVE);
   const snapshot = snapshotFromItems(active);
-  const nextVersion = (await latestContextVersion(db, conversationId)) + 1;
+  const nextVersion = (await latestContextVersion(db, userId)) + 1;
 
   await db.insert(contextVersions).values({
-    conversationId,
+    userId,
     version: nextVersion,
     stateJson: JSON.stringify(snapshot),
     sourceMessageIdsJson: JSON.stringify(sourceMessageIds),
@@ -136,13 +136,13 @@ export async function writeContextVersion(
 
 export async function markItemsObsolete(
   db: Database,
-  conversationId: string,
+  userId: string,
   obsoleteDescriptions: string[]
 ): Promise<MemoryItem[]> {
   if (!obsoleteDescriptions || obsoleteDescriptions.length === 0) {
     return [];
   }
-  const active = await listMemoryItems(db, conversationId, MemoryStatus.ACTIVE);
+  const active = await listMemoryItems(db, userId, MemoryStatus.ACTIVE);
   const marked: MemoryItem[] = [];
   const nowIso = new Date().toISOString();
 

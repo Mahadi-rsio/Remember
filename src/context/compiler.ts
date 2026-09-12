@@ -30,7 +30,7 @@ export interface CompileResult {
 
 async function persistContextSnapshot(
   db: Database,
-  conversationId: string,
+  userId: string,
   compiledMessages: Array<Record<string, any>>,
   options: {
     budget: number;
@@ -40,7 +40,7 @@ async function persistContextSnapshot(
   }
 ): Promise<number | null> {
   try {
-    const nextVer = (await latestContextVersion(db, conversationId)) + 1;
+    const nextVer = (await latestContextVersion(db, userId)) + 1;
     const stateData = {
       budget: options.budget,
       total_tokens: options.totalTokens,
@@ -48,7 +48,7 @@ async function persistContextSnapshot(
       canonical_items_count: options.canonicalCount,
     };
     await db.insert(contextVersions).values({
-      conversationId,
+      userId,
       version: nextVer,
       stateJson: JSON.stringify(stateData),
       sourceMessageIdsJson: JSON.stringify(options.sourceMessageIds),
@@ -63,7 +63,7 @@ async function persistContextSnapshot(
 export async function compileContext(
   db: Database | null,
   messages: Array<Record<string, any>>,
-  conversationId?: string | null,
+  userId?: string | null,
   options?: {
     budget?: number;
     memoryAi?: MemoryAIAdapter | null;
@@ -93,9 +93,9 @@ export async function compileContext(
     const queryKeywords = extractKeywords(latestUserText);
 
     let canonicalItems: any[] = [];
-    if (db && conversationId) {
+    if (db && userId) {
       try {
-        const rawItems = await listMemoryItems(db, conversationId, MemoryStatus.ACTIVE);
+        const rawItems = await listMemoryItems(db, userId, MemoryStatus.ACTIVE);
         canonicalItems = resolveActiveConflicts(rawItems);
       } catch {}
     }
@@ -149,8 +149,8 @@ export async function compileContext(
     const currentTokens = estimateMessagesTokens(messages);
     if (canonicalItems.length === 0 && currentTokens <= targetBudget) {
       let versionNum: number | null = null;
-      if (db && conversationId && options?.persistSnapshot !== false) {
-        versionNum = await persistContextSnapshot(db, conversationId, messages, {
+      if (db && userId && options?.persistSnapshot !== false) {
+        versionNum = await persistContextSnapshot(db, userId, messages, {
           budget: targetBudget,
           totalTokens: currentTokens,
           canonicalCount: 0,
@@ -176,9 +176,9 @@ export async function compileContext(
     const canonicalUsed = selected.filter((s) => s.kind === "canonical_memory").length;
 
     let versionNum: number | null = null;
-    if (db && conversationId && options?.persistSnapshot !== false) {
+    if (db && userId && options?.persistSnapshot !== false) {
       const sourceIds = selected.map((s) => s.itemId);
-      versionNum = await persistContextSnapshot(db, conversationId, compiledMessages, {
+      versionNum = await persistContextSnapshot(db, userId, compiledMessages, {
         budget: targetBudget,
         totalTokens: finalTokens,
         canonicalCount: canonicalUsed,

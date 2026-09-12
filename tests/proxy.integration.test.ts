@@ -59,7 +59,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       expect(sent.messages[0].role).toBe("user");
       return new Response(JSON.stringify(upstreamBody), {
         status: 200,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
       });
     }) as any;
 
@@ -67,7 +67,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       "/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
         body: JSON.stringify({
           model: "gpt-test",
           messages: [{ role: "user", content: "I prefer PostgreSQL" }],
@@ -89,7 +89,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       "/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
         body: JSON.stringify({
           model: "gpt-test",
           stream: true,
@@ -111,7 +111,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       "/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
         body: "{not valid json",
       },
       chatRequestEnv()
@@ -132,7 +132,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       "/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
         body: JSON.stringify({
           model: "gpt-test",
           messages: [{ role: "user", content: "hi" }],
@@ -153,7 +153,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       upstreamCalled = true;
       return new Response(JSON.stringify(UPSTREAM_BODY), {
         status: 200,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
       });
     }) as any;
 
@@ -161,7 +161,7 @@ describe("Transparent Proxy Integration (fail-open, response identity)", () => {
       "/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer 1234" },
         body: JSON.stringify({
           model: "gpt-test",
           messages: [{ role: "user", content: "I prefer PostgreSQL" }],

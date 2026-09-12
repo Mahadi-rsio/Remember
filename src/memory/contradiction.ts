@@ -43,13 +43,13 @@ export function dumpSourceIds(ids: string[]): string {
   return JSON.stringify(ordered);
 }
 
-export async function loadActiveItems(db: Database, conversationId: string): Promise<MemoryItem[]> {
+export async function loadActiveItems(db: Database, userId: string): Promise<MemoryItem[]> {
   return await db
     .select()
     .from(memoryItems)
     .where(
       and(
-        eq(memoryItems.conversationId, conversationId),
+        eq(memoryItems.userId, userId),
         eq(memoryItems.status, MemoryStatus.ACTIVE)
       )
     );
@@ -176,11 +176,11 @@ function findRevocationTargets(candidate: CandidateMemory, active: MemoryItem[])
 
 export async function applyCandidate(
   db: Database,
-  conversationId: string,
+  userId: string,
   candidate: CandidateMemory,
   activeItems?: MemoryItem[]
 ): Promise<ApplyResult> {
-  const active = activeItems ?? (await loadActiveItems(db, conversationId));
+  const active = activeItems ?? (await loadActiveItems(db, userId));
 
   const sameTypeContents = active.filter((i) => i.type === candidate.type).map((i) => i.content);
   candidate.scores = scoreCandidate(candidate, sameTypeContents);
@@ -226,7 +226,7 @@ export async function applyCandidate(
       const [inserted] = await db
         .insert(memoryItems)
         .values({
-          conversationId,
+          userId,
           content: candidate.content,
           type: candidate.type,
           topicKey: candidate.topicKey,
@@ -294,7 +294,7 @@ export async function applyCandidate(
       const [inserted] = await db
         .insert(memoryItems)
         .values({
-          conversationId,
+          userId,
           content: candidate.content,
           type: candidate.type,
           topicKey: candidate.topicKey,
@@ -340,7 +340,7 @@ export async function applyCandidate(
   const [created] = await db
     .insert(memoryItems)
     .values({
-      conversationId,
+      userId,
       content: candidate.content,
       type: candidate.type,
       topicKey: candidate.topicKey,

@@ -1,14 +1,14 @@
 import { pgTable, varchar, text, timestamp, serial, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { conversations } from "./conversations";
+import { users } from "./users";
 
 export const messages = pgTable(
   "messages",
   {
     id: serial("id").primaryKey(),
-    conversationId: varchar("conversation_id", { length: 128 })
+    userId: varchar("user_id", { length: 128 })
       .notNull()
-      .references(() => conversations.id),
+      .references(() => users.userId),
     messageKey: varchar("message_key", { length: 128 }).notNull(),
     role: varchar("role", { length: 32 }).notNull(),
     content: text("content").notNull(),
@@ -21,9 +21,9 @@ export const messages = pgTable(
       .default(sql`now()`),
   },
   (table) => [
-    index("idx_messages_conversation_id").on(table.conversationId),
+    index("idx_messages_user_id").on(table.userId),
     index("idx_messages_message_key").on(table.messageKey),
-    uniqueIndex("uq_conv_message_key").on(table.conversationId, table.messageKey),
+    uniqueIndex("uq_user_message_key").on(table.userId, table.messageKey),
   ]
 );
 

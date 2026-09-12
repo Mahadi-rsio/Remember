@@ -17,7 +17,7 @@ describe("Context Compilation and Token Estimation", () => {
       { role: "user", content: "Let's proceed with Cloudflare Workers." },
     ];
 
-    const result = await compileContext(null, messages, "test-conv-1", {
+    const result = await compileContext(null, messages, "test-user", {
       budget: 500,
       persistSnapshot: false,
     });

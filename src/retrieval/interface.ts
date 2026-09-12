@@ -5,11 +5,11 @@ export interface RetrievalResult {
   role?: string;
   itemType?: string;
   topicKey?: string;
-  conversationId: string;
+  userId: string;
   score: number;
 }
 
 export interface Retriever {
-  searchMessages(query: string, conversationId: string, limit?: number): Promise<RetrievalResult[]>;
-  searchMemory(query: string, conversationId: string, limit?: number): Promise<RetrievalResult[]>;
+  searchMessages(query: string, userId: string, limit?: number): Promise<RetrievalResult[]>;
+  searchMemory(query: string, userId: string, limit?: number): Promise<RetrievalResult[]>;
 }

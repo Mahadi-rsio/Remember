@@ -1,14 +1,14 @@
 import { pgTable, varchar, text, timestamp, serial, integer, real, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { conversations } from "./conversations";
+import { users } from "./users";
 
 export const memoryItems = pgTable(
   "memory_items",
   {
     id: serial("id").primaryKey(),
-    conversationId: varchar("conversation_id", { length: 128 })
+    userId: varchar("user_id", { length: 128 })
       .notNull()
-      .references(() => conversations.id),
+      .references(() => users.userId),
     content: text("content").notNull(),
     type: varchar("type", { length: 64 }).notNull(),
     topicKey: varchar("topic_key", { length: 128 }).notNull().default(""),
@@ -28,7 +28,7 @@ export const memoryItems = pgTable(
       .default(sql`now()`),
   },
   (table) => [
-    index("idx_memory_items_conversation_id").on(table.conversationId),
+    index("idx_memory_items_user_id").on(table.userId),
     index("idx_memory_items_type").on(table.type),
     index("idx_memory_items_topic_key").on(table.topicKey),
     index("idx_memory_items_status").on(table.status),

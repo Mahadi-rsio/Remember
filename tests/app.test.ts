@@ -23,7 +23,7 @@ describe("Hono Worker App Endpoints", () => {
     expect(json.database.provider).toBe("neon");
   });
 
-  it("enforces authentication when GATEWAY_API_KEY is configured", async () => {
+  it("enforces authentication: missing key returns 401", async () => {
     const res = await app.request(
       "/v1/models",
       {
@@ -31,9 +31,35 @@ describe("Hono Worker App Endpoints", () => {
           "Content-Type": "application/json",
         },
       },
+      {}
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects invalid API key with 401", async () => {
+    const res = await app.request(
+      "/v1/models",
       {
-        GATEWAY_API_KEY: "secret-key-123",
-      }
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer wrong-key",
+        },
+      },
+      {}
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects non-Bearer authorization with 401", async () => {
+    const res = await app.request(
+      "/v1/models",
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": "1234",
+        },
+      },
+      {}
     );
     expect(res.status).toBe(401);
   });

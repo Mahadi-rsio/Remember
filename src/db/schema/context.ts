@@ -1,14 +1,14 @@
 import { pgTable, varchar, text, timestamp, serial, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { conversations } from "./conversations";
+import { users } from "./users";
 
 export const contextVersions = pgTable(
   "context_versions",
   {
     id: serial("id").primaryKey(),
-    conversationId: varchar("conversation_id", { length: 128 })
+    userId: varchar("user_id", { length: 128 })
       .notNull()
-      .references(() => conversations.id),
+      .references(() => users.userId),
     version: integer("version").notNull().default(1),
     stateJson: text("state_json").notNull().default("{}"),
     sourceMessageIdsJson: text("source_message_ids_json").notNull().default("[]"),
@@ -17,8 +17,8 @@ export const contextVersions = pgTable(
       .default(sql`now()`),
   },
   (table) => [
-    index("idx_context_versions_conversation_id").on(table.conversationId),
-    uniqueIndex("uq_conv_context_version").on(table.conversationId, table.version),
+    index("idx_context_versions_user_id").on(table.userId),
+    uniqueIndex("uq_user_context_version").on(table.userId, table.version),
   ]
 );
 

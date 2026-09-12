@@ -134,7 +134,8 @@ Track work against `plan.md`. Check items as they land.
 - [ ] Streaming SSE proxy identity (chunks pass through unmodified)
 - [ ] Upstream error codes mapped correctly (4xx, 5xx → 502)
 - [ ] Bad JSON → 400 response
-- [ ] Auth rejection when `GATEWAY_API_KEY` set
+- [x] Mandatory API-key auth: `Bearer 1234` succeeds; missing / invalid / non-Bearer → 401 (`tests/app.test.ts`)
+- [x] All proxy requests authenticated with `Bearer 1234` (`tests/proxy.integration.test.ts`)
 
 ### 9.2 Delta Detection Tests
 - [ ] New messages flagged as delta
@@ -166,9 +167,11 @@ Track work against `plan.md`. Check items as they land.
 - [ ] Recent context preserved over old stale items
 
 ### 9.6 Isolation Tests
-- [ ] Memories from conversation A never appear in conversation B
-- [ ] `X-Conversation-Id` header correctly scopes state
-- [ ] Deterministic fingerprint fallback consistent across calls
+- [x] Memories scoped by API-key-derived `user_id` (no conversation/session/thread ID)
+- [x] User A memory never appears for user B (`tests/memory-isolation-context.integration.test.ts`)
+- [x] Memory persists across completely independent requests (no conversation ID) (`tests/user-memory-persistence.integration.test.ts`)
+- [x] Memory scoped to user: other users never recall the fact
+- [x] Deterministic fingerprint fallback consistent across calls
 
 ### 9.7 Fail-Open Tests
 - [ ] DB error → main AI still called; error logged but not surfaced

@@ -5,8 +5,7 @@ import { OpenAICompatibleProvider, UpstreamError } from "../providers/openai-com
 import { createMemoryAIAdapter } from "../providers/memory-ai";
 import { archiveRequestAsync } from "../storage/archive";
 import { compileContext } from "../context/compiler";
-import { deriveIsolationKeys } from "../memory/isolation";
-import { checkAuth } from "./auth";
+import { checkAuth, type AuthUser } from "./auth";
 import { checkRateLimit } from "./rate-limit";
 
 export const v1Router = new Hono<HonoContext>();
@@ -45,7 +44,8 @@ function upstreamErrorResponse(exc: any) {
 
 async function prepareUpstreamBody(
   c: any,
-  body: Record<string, any>
+  body: Record<string, any>,
+  userId: string
 ): Promise<Record<string, any>> {
   const messages = body.messages;
   if (!Array.isArray(messages)) {
@@ -53,7 +53,6 @@ async function prepareUpstreamBody(
   }
 
   try {
-    const [conversationId] = deriveIsolationKeys(body, c.req.raw.headers);
     let db = null;
     try {
       db = getDb(c.env);
@@ -70,7 +69,7 @@ async function prepareUpstreamBody(
       }
     }
 
-    const compiled = await compileContext(db, messages, conversationId, {
+    const compiled = await compileContext(db, messages, userId, {
       budget: budgetVal,
       memoryAi,
       persistSnapshot: true,
@@ -88,8 +87,8 @@ async function prepareUpstreamBody(
 
 // GET /v1/models
 v1Router.get("/models", async (c) => {
-  const authResp = checkAuth(c);
-  if (authResp) return authResp;
+  const auth = checkAuth(c);
+  if (auth instanceof Response) return auth;
 
   const rlResp = await checkRateLimit(c);
   if (rlResp) return rlResp;
@@ -111,8 +110,8 @@ v1Router.get("/models", async (c) => {
 
 // POST /v1/chat/completions
 v1Router.post("/chat/completions", async (c) => {
-  const authResp = checkAuth(c);
-  if (authResp) return authResp;
+  const auth = checkAuth(c);
+  if (auth instanceof Response) return auth;
 
   const rlResp = await checkRateLimit(c);
   if (rlResp) return rlResp;
@@ -132,9 +131,12 @@ v1Router.post("/chat/completions", async (c) => {
   try {
     const db = getDb(c.env);
     const memoryAi = createMemoryAIAdapter(c.env);
-    const headers = c.req.raw.headers;
 
-    const archiveTask = archiveRequestAsync(db, body, headers, memoryAi).catch(() => {});
+    const archiveTask = archiveRequestAsync(db, body, {
+      userId: auth.userId,
+      apiKey: auth.apiKey,
+      memoryAi,
+    }).catch(() => {});
     if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
       c.executionCtx.waitUntil(archiveTask);
     } else {
@@ -142,7 +144,7 @@ v1Router.post("/chat/completions", async (c) => {
     }
   } catch {}
 
-  const upstreamBody = await prepareUpstreamBody(c, body);
+  const upstreamBody = await prepareUpstreamBody(c, body, auth.userId);
   const provider = getProvider(c);
 
   if (upstreamBody.stream) {
@@ -176,8 +178,8 @@ v1Router.post("/chat/completions", async (c) => {
 
 // POST /v1/responses
 v1Router.post("/responses", async (c) => {
-  const authResp = checkAuth(c);
-  if (authResp) return authResp;
+  const auth = checkAuth(c);
+  if (auth instanceof Response) return auth;
 
   const rlResp = await checkRateLimit(c);
   if (rlResp) return rlResp;
@@ -197,9 +199,12 @@ v1Router.post("/responses", async (c) => {
   try {
     const db = getDb(c.env);
     const memoryAi = createMemoryAIAdapter(c.env);
-    const headers = c.req.raw.headers;
 
-    const archiveTask = archiveRequestAsync(db, body, headers, memoryAi).catch(() => {});
+    const archiveTask = archiveRequestAsync(db, body, {
+      userId: auth.userId,
+      apiKey: auth.apiKey,
+      memoryAi,
+    }).catch(() => {});
     if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
       c.executionCtx.waitUntil(archiveTask);
     } else {
@@ -207,7 +212,7 @@ v1Router.post("/responses", async (c) => {
     }
   } catch {}
 
-  const upstreamBody = await prepareUpstreamBody(c, body);
+  const upstreamBody = await prepareUpstreamBody(c, body, auth.userId);
   const provider = getProvider(c);
 
   if (upstreamBody.stream) {

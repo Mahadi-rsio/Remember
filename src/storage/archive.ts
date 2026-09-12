@@ -1,11 +1,10 @@
 import { eq, and } from "drizzle-orm";
 import type { Database } from "../db";
-import { conversations as conversationsTable } from "../db/schema/conversations";
+import { users as usersTable } from "../db/schema/users";
 import { messages as messagesTable, type Message } from "../db/schema/messages";
 import { detectDelta, type DeltaResult } from "../memory/delta";
 import { processMemoryDelta, processMemoryDeltaAsync } from "../memory/engine";
 import type { NormalizedMessage } from "../memory/ids";
-import { deriveIsolationKeys } from "../memory/isolation";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 
 export function extractMessageList(body: Record<string, any>): Array<Record<string, any>> {
@@ -32,43 +31,29 @@ export function extractMessageList(body: Record<string, any>): Array<Record<stri
   return [];
 }
 
-export async function ensureConversation(
+export async function ensureUser(
   db: Database,
-  conversationId: string,
-  userKey: string | null,
-  extraMeta?: Record<string, any> | null
+  userId: string,
+  apiKey: string | null
 ): Promise<void> {
   const existing = await db
     .select()
-    .from(conversationsTable)
-    .where(eq(conversationsTable.id, conversationId))
+    .from(usersTable)
+    .where(eq(usersTable.userId, userId))
     .limit(1);
 
-  const nowIso = new Date().toISOString();
   if (existing.length === 0) {
-    await db.insert(conversationsTable).values({
-      id: conversationId,
-      userKey,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      metadataJson: extraMeta ? JSON.stringify(extraMeta) : null,
+    await db.insert(usersTable).values({
+      userId,
+      apiKey: apiKey || "",
+      createdAt: new Date().toISOString(),
     });
-  } else {
-    const row = existing[0];
-    const updateData: { updatedAt: string; userKey?: string | null } = { updatedAt: nowIso };
-    if (userKey && !row.userKey) {
-      updateData.userKey = userKey;
-    }
-    await db
-      .update(conversationsTable)
-      .set(updateData)
-      .where(eq(conversationsTable.id, conversationId));
   }
 }
 
 export async function persistNewMessages(
   db: Database,
-  conversationId: string,
+  userId: string,
   newMessages: NormalizedMessage[]
 ): Promise<Message[]> {
   const written: Message[] = [];
@@ -80,7 +65,7 @@ export async function persistNewMessages(
       .from(messagesTable)
       .where(
         and(
-          eq(messagesTable.conversationId, conversationId),
+          eq(messagesTable.userId, userId),
           eq(messagesTable.messageKey, msg.messageKey)
         )
       )
@@ -93,7 +78,7 @@ export async function persistNewMessages(
     const [row] = await db
       .insert(messagesTable)
       .values({
-        conversationId,
+        userId,
         messageKey: msg.messageKey,
         role: msg.role,
         content: msg.content,
@@ -114,16 +99,16 @@ export async function persistNewMessages(
 export async function archiveRequest(
   db: Database,
   body: Record<string, any>,
-  headers?: Headers | Record<string, string>
+  options?: { userId: string; apiKey?: string | null; headers?: Headers | Record<string, string> }
 ): Promise<DeltaResult | null> {
   try {
-    const [conversationId, userKey] = deriveIsolationKeys(body, headers);
+    const userId = options?.userId || "";
     const messages = extractMessageList(body);
-    await ensureConversation(db, conversationId, userKey);
+    await ensureUser(db, userId, options?.apiKey ?? null);
 
-    const delta = await detectDelta(db, conversationId, userKey, messages);
+    const delta = await detectDelta(db, userId, null, messages);
     if (delta.newMessages.length > 0) {
-      await persistNewMessages(db, conversationId, delta.newMessages);
+      await persistNewMessages(db, userId, delta.newMessages);
     }
 
     if (delta.newMessages.length > 0) {
@@ -141,22 +126,21 @@ export async function archiveRequest(
 export async function archiveRequestAsync(
   db: Database,
   body: Record<string, any>,
-  headers?: Headers | Record<string, string>,
-  memoryAi?: MemoryAIAdapter | null
+  options?: { userId: string; apiKey?: string | null; headers?: Headers | Record<string, string>; memoryAi?: MemoryAIAdapter | null }
 ): Promise<DeltaResult | null> {
   try {
-    const [conversationId, userKey] = deriveIsolationKeys(body, headers);
+    const userId = options?.userId || "";
     const messages = extractMessageList(body);
-    await ensureConversation(db, conversationId, userKey);
+    await ensureUser(db, userId, options?.apiKey ?? null);
 
-    const delta = await detectDelta(db, conversationId, userKey, messages);
+    const delta = await detectDelta(db, userId, null, messages);
     if (delta.newMessages.length > 0) {
-      await persistNewMessages(db, conversationId, delta.newMessages);
+      await persistNewMessages(db, userId, delta.newMessages);
     }
 
     if (delta.newMessages.length > 0) {
       try {
-        await processMemoryDeltaAsync(db, delta, { memoryAi });
+        await processMemoryDeltaAsync(db, delta, { memoryAi: options?.memoryAi });
       } catch {}
     }
 
@@ -168,12 +152,12 @@ export async function archiveRequestAsync(
 
 export async function listArchivedKeys(
   db: Database,
-  conversationId: string
+  userId: string
 ): Promise<Set<string>> {
   const rows = await db
     .select({ messageKey: messagesTable.messageKey })
     .from(messagesTable)
-    .where(eq(messagesTable.conversationId, conversationId));
+    .where(eq(messagesTable.userId, userId));
 
   return new Set(rows.map((r) => r.messageKey));
 }

@@ -16,7 +16,7 @@ import { MemoryStatus, snapshotFromItems } from "../models/memory";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 
 export interface MemoryUpdateResult {
-  conversationId: string;
+  userId: string;
   skippedLowInfo?: boolean;
   candidates: number;
   applied: ApplyResult[];
@@ -32,7 +32,7 @@ export async function processMemoryDelta(
 ): Promise<MemoryUpdateResult | null> {
   if (!delta.newMessages || delta.newMessages.length === 0) {
     return {
-      conversationId: delta.conversationId,
+      userId: delta.userId,
       candidates: 0,
       applied: [],
       obsoleteMarked: 0,
@@ -45,7 +45,7 @@ export async function processMemoryDelta(
 
   if (meaningful.length === 0) {
     return {
-      conversationId: delta.conversationId,
+      userId: delta.userId,
       skippedLowInfo: true,
       candidates: 0,
       applied: [],
@@ -71,14 +71,14 @@ export async function processMemoryDelta(
 
     let results: ApplyResult[] = [];
     if (candidates.length > 0) {
-      results = await persistCandidates(db, delta.conversationId, candidates);
+      results = await persistCandidates(db, delta.userId, candidates);
     }
 
     let obsoleteCount = 0;
     if (memoryAiOutput && memoryAiOutput.obsolete_items.length > 0) {
       const marked = await markItemsObsolete(
         db,
-        delta.conversationId,
+        delta.userId,
         memoryAiOutput.obsolete_items
       );
       obsoleteCount = marked.length;
@@ -86,11 +86,11 @@ export async function processMemoryDelta(
 
     let versionNum: number | null = null;
     if (memoryChanged(results, obsoleteCount)) {
-      versionNum = await writeContextVersion(db, delta.conversationId, sourceIds);
+      versionNum = await writeContextVersion(db, delta.userId, sourceIds);
     }
 
     return {
-      conversationId: delta.conversationId,
+      userId: delta.userId,
       candidates: candidates.length,
       applied: results,
       obsoleteMarked: obsoleteCount,
@@ -98,7 +98,7 @@ export async function processMemoryDelta(
     };
   } catch (err: any) {
     return {
-      conversationId: delta.conversationId,
+      userId: delta.userId,
       candidates: 0,
       applied: [],
       obsoleteMarked: 0,
@@ -114,7 +114,7 @@ export async function processMemoryDeltaAsync(
 ): Promise<MemoryUpdateResult | null> {
   if (!delta.newMessages || delta.newMessages.length === 0) {
     return {
-      conversationId: delta.conversationId,
+      userId: delta.userId,
       candidates: 0,
       applied: [],
       obsoleteMarked: 0,
@@ -127,7 +127,7 @@ export async function processMemoryDeltaAsync(
 
   if (meaningful.length === 0) {
     return {
-      conversationId: delta.conversationId,
+      userId: delta.userId,
       skippedLowInfo: true,
       candidates: 0,
       applied: [],
@@ -147,7 +147,7 @@ export async function processMemoryDeltaAsync(
 
       let priorSummary: string | null = null;
       try {
-        const active = await listMemoryItems(db, delta.conversationId, MemoryStatus.ACTIVE);
+        const active = await listMemoryItems(db, delta.userId, MemoryStatus.ACTIVE);
         if (active.length > 0) {
           priorSummary = JSON.stringify(snapshotFromItems(active));
         }
