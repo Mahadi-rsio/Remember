@@ -1,0 +1,22 @@
+# Turso LibSQL Database Credentials
+TURSO_DATABASE_URL=libsql://your-database-name.turso.io
+TURSO_AUTH_TOKEN=your-turso-auth-token
+
+# Upstream Main AI Credentials (e.g. OpenAI or OpenRouter)
+UPSTREAM_PROVIDER=openai
+UPSTREAM_BASE_URL=https://api.openai.com/v1
+UPSTREAM_API_KEY=your-upstream-api-key
+
+# Gateway Authentication (Optional; for client -> gateway auth)
+# GATEWAY_API_KEY=your-gateway-api-key
+
+# Memory AI Compressor (Optional)
+MEMORY_AI_ENABLED=false
+MEMORY_AI_PROVIDER=openrouter
+MEMORY_AI_BASE_URL=https://openrouter.ai/api/v1
+MEMORY_AI_MODEL=cheap-model
+MEMORY_AI_API_KEY=
+
+# Context Budget
+CONTEXT_BUDGET=8000
+LOG_LEVEL=info

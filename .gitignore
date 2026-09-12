@@ -1,4 +1,7 @@
 node_modules/
+dist/
+.wrangler/
+.dev.vars
 *.pyc
 __pycache__/
 .pytest_cache/
@@ -8,3 +11,4 @@ venv/
 **/.env
 logs/
 memory-gateway/logs/
+
