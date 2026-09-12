@@ -28,7 +28,8 @@ app.get("/", (c) => {
     runtime: "Cloudflare Workers",
     framework: "Hono",
     orm: "Drizzle",
-    database: "Turso (libSQL)",
+    database: "Cloudflare D1 (SQLite)",
+    cache: "Upstash Redis",
     version: "0.1.0",
     endpoints: {
       health: "/health",

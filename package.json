@@ -1,18 +1,21 @@
 {
   "name": "remember-memory-gateway",
   "version": "0.1.0",
-  "description": "AI Memory Gateway - Cloudflare Workers with Hono, Drizzle ORM, and Turso",
+  "description": "AI Memory Gateway - Cloudflare Workers with Hono, D1, Drizzle ORM, and Upstash Redis",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate:local": "wrangler d1 migrations apply memory-gateway-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply memory-gateway-db --remote",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@libsql/client": "^0.18.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.4",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
     "opencode-ai": "^1.18.30",
@@ -23,7 +26,6 @@
     "@types/node": "^20.17.19",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "wrangler": "^4.131.1"
   }

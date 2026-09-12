@@ -1,0 +1,180 @@
+import { eq, and, desc } from "drizzle-orm";
+import type { Database } from "../db";
+import { memoryItems, type MemoryItem } from "../db/schema/memory";
+import { corrections } from "../db/schema/corrections";
+import { contextVersions } from "../db/schema/context";
+import {
+  type CandidateMemory,
+  MemoryStatus,
+  snapshotFromItems,
+} from "../models/memory";
+import {
+  type ApplyResult,
+  applyCandidate,
+  loadActiveItems,
+} from "./contradiction";
+
+export async function listMemoryItems(
+  db: Database,
+  conversationId: string,
+  status: string | null = MemoryStatus.ACTIVE
+): Promise<MemoryItem[]> {
+  if (status !== null) {
+    return await db
+      .select()
+      .from(memoryItems)
+      .where(
+        and(
+          eq(memoryItems.conversationId, conversationId),
+          eq(memoryItems.status, status)
+        )
+      );
+  }
+  return await db
+    .select()
+    .from(memoryItems)
+    .where(eq(memoryItems.conversationId, conversationId));
+}
+
+export function resolveActiveConflicts(items: MemoryItem[]): MemoryItem[] {
+  const byTopic: Record<string, MemoryItem> = {};
+  const independent: MemoryItem[] = [];
+
+  for (const item of items) {
+    const topic = (item.topicKey || "").trim();
+    if (!topic) {
+      independent.push(item);
+      continue;
+    }
+    const existing = byTopic[topic];
+    if (!existing) {
+      byTopic[topic] = item;
+      continue;
+    }
+    if (
+      item.version > existing.version ||
+      (item.version === existing.version && item.updatedAt > existing.updatedAt)
+    ) {
+      byTopic[topic] = item;
+    }
+  }
+
+  return [...independent, ...Object.values(byTopic)];
+}
+
+export async function latestContextVersion(
+  db: Database,
+  conversationId: string
+): Promise<number> {
+  const rows = await db
+    .select({ version: contextVersions.version })
+    .from(contextVersions)
+    .where(eq(contextVersions.conversationId, conversationId))
+    .orderBy(desc(contextVersions.version))
+    .limit(1);
+
+  return rows.length > 0 ? rows[0].version : 0;
+}
+
+export async function persistCandidates(
+  db: Database,
+  conversationId: string,
+  candidates: CandidateMemory[]
+): Promise<ApplyResult[]> {
+  const results: ApplyResult[] = [];
+  let active = await loadActiveItems(db, conversationId);
+
+  for (const candidate of candidates) {
+    const result = await applyCandidate(db, conversationId, candidate, active);
+    results.push(result);
+
+    if (result.correction && result.action === "supersede" && result.item) {
+      await db.insert(corrections).values({
+        conversationId,
+        target: result.correction.target,
+        oldValue: result.correction.oldValue,
+        newValue: result.correction.newValue,
+        status: "active",
+        sourceMessageIdsJson: JSON.stringify(candidate.sourceMessageIds),
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    if (result.action === "create" && result.item) {
+      active.push(result.item);
+    } else if (result.action === "supersede" && result.item) {
+      active = active.filter((i) => i.id !== result.superseded?.id);
+      active.push(result.item);
+    } else if (result.action === "revoke" && result.revoked) {
+      const revokedIds = new Set(result.revoked.map((i) => i.id));
+      active = active.filter((i) => !revokedIds.has(i.id));
+    }
+  }
+
+  return results;
+}
+
+export async function writeContextVersion(
+  db: Database,
+  conversationId: string,
+  sourceMessageIds: string[]
+): Promise<number> {
+  const active = await listMemoryItems(db, conversationId, MemoryStatus.ACTIVE);
+  const snapshot = snapshotFromItems(active);
+  const nextVersion = (await latestContextVersion(db, conversationId)) + 1;
+
+  await db.insert(contextVersions).values({
+    conversationId,
+    version: nextVersion,
+    stateJson: JSON.stringify(snapshot),
+    sourceMessageIdsJson: JSON.stringify(sourceMessageIds),
+    createdAt: new Date().toISOString(),
+  });
+
+  return nextVersion;
+}
+
+export async function markItemsObsolete(
+  db: Database,
+  conversationId: string,
+  obsoleteDescriptions: string[]
+): Promise<MemoryItem[]> {
+  if (!obsoleteDescriptions || obsoleteDescriptions.length === 0) {
+    return [];
+  }
+  const active = await listMemoryItems(db, conversationId, MemoryStatus.ACTIVE);
+  const marked: MemoryItem[] = [];
+  const nowIso = new Date().toISOString();
+
+  for (const desc of obsoleteDescriptions) {
+    const descClean = desc.trim().toLowerCase();
+    if (!descClean) continue;
+    for (const item of active) {
+      if (marked.some((m) => m.id === item.id)) continue;
+      const itemClean = item.content.toLowerCase();
+      const topicClean = (item.topicKey || "").toLowerCase();
+      if (
+        descClean.includes(itemClean) ||
+        itemClean.includes(descClean) ||
+        (topicClean && descClean.includes(topicClean))
+      ) {
+        await db
+          .update(memoryItems)
+          .set({ status: MemoryStatus.OBSOLETE, updatedAt: nowIso })
+          .where(eq(memoryItems.id, item.id));
+        item.status = MemoryStatus.OBSOLETE;
+        item.updatedAt = nowIso;
+        marked.push(item);
+      }
+    }
+  }
+
+  return marked;
+}
+
+export function memoryChanged(results: ApplyResult[], obsoleteCount = 0): boolean {
+  return (
+    results.some((r) => ["create", "merge", "supersede", "revoke"].includes(r.action)) ||
+    obsoleteCount > 0
+  );
+}

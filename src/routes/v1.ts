@@ -1,60 +1,240 @@
 import { Hono } from "hono";
 import type { HonoContext } from "../env";
+import { getDb } from "../db";
+import { OpenAICompatibleProvider, UpstreamError } from "../providers/openai-compatible";
+import { createMemoryAIAdapter } from "../providers/memory-ai";
+import { archiveRequestAsync } from "../storage/archive";
+import { compileContext } from "../context/compiler";
+import { deriveIsolationKeys } from "../memory/isolation";
+import { checkAuth } from "./auth";
+import { checkRateLimit } from "./rate-limit";
 
 export const v1Router = new Hono<HonoContext>();
 
-// GET /v1/models - List upstream models
-v1Router.get("/models", async (c) => {
-  const env = c.env;
-  const upstreamBase = env.UPSTREAM_BASE_URL ?? "https://api.openai.com/v1";
-  const apiKey = env.UPSTREAM_API_KEY;
+function getProvider(c: any): OpenAICompatibleProvider {
+  const baseUrl = c.env.UPSTREAM_BASE_URL || "https://api.openai.com/v1";
+  const apiKey = c.env.UPSTREAM_API_KEY;
+  return new OpenAICompatibleProvider({ baseUrl, apiKey });
+}
 
-  if (!apiKey) {
-    return c.json(
-      {
-        error: {
-          message: "UPSTREAM_API_KEY is not configured on gateway",
-          type: "server_error",
-        },
+function badJsonError() {
+  return Response.json(
+    {
+      error: {
+        message: "Request body must be valid JSON",
+        type: "invalid_request_error",
+        code: "invalid_json",
       },
-      500
-    );
+    },
+    { status: 400 }
+  );
+}
+
+function upstreamErrorResponse(exc: any) {
+  return Response.json(
+    {
+      error: {
+        message: "Failed to reach upstream AI provider",
+        type: "upstream_error",
+        code: "upstream_unreachable",
+      },
+    },
+    { status: 502 }
+  );
+}
+
+async function prepareUpstreamBody(
+  c: any,
+  body: Record<string, any>
+): Promise<Record<string, any>> {
+  const messages = body.messages;
+  if (!Array.isArray(messages)) {
+    return body;
   }
 
   try {
-    const upstreamUrl = `${upstreamBase.replace(/\/+$/, "")}/models`;
-    const response = await fetch(upstreamUrl, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+    const [conversationId] = deriveIsolationKeys(body, c.req.raw.headers);
+    let db = null;
+    try {
+      db = getDb(c.env);
+    } catch {}
+
+    const memoryAi = createMemoryAIAdapter(c.env);
+
+    let budgetVal: number | undefined = undefined;
+    const rawBudget = body.context_budget ?? c.req.header("x-context-budget") ?? c.env.CONTEXT_BUDGET;
+    if (rawBudget !== undefined) {
+      const parsed = Number(rawBudget);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        budgetVal = parsed;
+      }
+    }
+
+    const compiled = await compileContext(db, messages, conversationId, {
+      budget: budgetVal,
+      memoryAi,
+      persistSnapshot: true,
     });
 
-    const data = await response.json();
-    return c.json(data, response.status as any);
-  } catch (error: any) {
-    return c.json(
-      {
-        error: {
-          message: error.message || "Failed to fetch models from upstream",
-          type: "upstream_error",
-        },
+    return {
+      ...body,
+      messages: compiled.messages,
+    };
+  } catch {
+    // Fail-open to original body on context compilation failure
+    return body;
+  }
+}
+
+// GET /v1/models
+v1Router.get("/models", async (c) => {
+  const authResp = checkAuth(c);
+  if (authResp) return authResp;
+
+  const rlResp = await checkRateLimit(c);
+  if (rlResp) return rlResp;
+
+  const provider = getProvider(c);
+  try {
+    const result = await provider.models();
+    return new Response(result.content, {
+      status: result.statusCode,
+      headers: {
+        ...result.headers,
+        "Content-Type": result.mediaType || "application/json",
       },
-      502
-    );
+    });
+  } catch (err: any) {
+    return upstreamErrorResponse(err);
   }
 });
 
-// POST /v1/chat/completions - OpenAI-compatible Chat Completions proxy stub
+// POST /v1/chat/completions
 v1Router.post("/chat/completions", async (c) => {
-  return c.json({
-    message: "Chat completions endpoint setup ready for migration pipeline",
-  });
+  const authResp = checkAuth(c);
+  if (authResp) return authResp;
+
+  const rlResp = await checkRateLimit(c);
+  if (rlResp) return rlResp;
+
+  let body: Record<string, any>;
+  try {
+    body = await c.req.json();
+  } catch {
+    return badJsonError();
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return badJsonError();
+  }
+
+  // Archive and background memory extraction
+  try {
+    const db = getDb(c.env);
+    const memoryAi = createMemoryAIAdapter(c.env);
+    const headers = c.req.raw.headers;
+
+    const archiveTask = archiveRequestAsync(db, body, headers, memoryAi).catch(() => {});
+    if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
+      c.executionCtx.waitUntil(archiveTask);
+    } else {
+      archiveTask;
+    }
+  } catch {}
+
+  const upstreamBody = await prepareUpstreamBody(c, body);
+  const provider = getProvider(c);
+
+  if (upstreamBody.stream) {
+    try {
+      const streamResult = await provider.openStream("/chat/completions", upstreamBody);
+      return new Response(streamResult.body, {
+        status: streamResult.statusCode,
+        headers: {
+          ...streamResult.headers,
+          "Content-Type": streamResult.mediaType || "text/event-stream",
+        },
+      });
+    } catch (err) {
+      return upstreamErrorResponse(err);
+    }
+  }
+
+  try {
+    const result = await provider.chat(upstreamBody);
+    return new Response(result.content, {
+      status: result.statusCode,
+      headers: {
+        ...result.headers,
+        "Content-Type": result.mediaType || "application/json",
+      },
+    });
+  } catch (err) {
+    return upstreamErrorResponse(err);
+  }
 });
 
-// POST /v1/responses - OpenAI-compatible Responses proxy stub
+// POST /v1/responses
 v1Router.post("/responses", async (c) => {
-  return c.json({
-    message: "Responses endpoint setup ready for migration pipeline",
-  });
+  const authResp = checkAuth(c);
+  if (authResp) return authResp;
+
+  const rlResp = await checkRateLimit(c);
+  if (rlResp) return rlResp;
+
+  let body: Record<string, any>;
+  try {
+    body = await c.req.json();
+  } catch {
+    return badJsonError();
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return badJsonError();
+  }
+
+  // Archive in background
+  try {
+    const db = getDb(c.env);
+    const memoryAi = createMemoryAIAdapter(c.env);
+    const headers = c.req.raw.headers;
+
+    const archiveTask = archiveRequestAsync(db, body, headers, memoryAi).catch(() => {});
+    if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
+      c.executionCtx.waitUntil(archiveTask);
+    } else {
+      archiveTask;
+    }
+  } catch {}
+
+  const upstreamBody = await prepareUpstreamBody(c, body);
+  const provider = getProvider(c);
+
+  if (upstreamBody.stream) {
+    try {
+      const streamResult = await provider.openStream("/responses", upstreamBody);
+      return new Response(streamResult.body, {
+        status: streamResult.statusCode,
+        headers: {
+          ...streamResult.headers,
+          "Content-Type": streamResult.mediaType || "text/event-stream",
+        },
+      });
+    } catch (err) {
+      return upstreamErrorResponse(err);
+    }
+  }
+
+  try {
+    const result = await provider.responses(upstreamBody);
+    return new Response(result.content, {
+      status: result.statusCode,
+      headers: {
+        ...result.headers,
+        "Content-Type": result.mediaType || "application/json",
+      },
+    });
+  } catch (err) {
+    return upstreamErrorResponse(err);
+  }
 });

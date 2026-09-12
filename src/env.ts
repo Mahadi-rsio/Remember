@@ -1,7 +1,12 @@
+import type { D1Database } from "@cloudflare/workers-types";
+
 export interface Env {
-  // Turso / LibSQL
-  TURSO_DATABASE_URL: string;
-  TURSO_AUTH_TOKEN?: string;
+  // Cloudflare D1 Database Binding
+  DB: D1Database;
+
+  // Upstash Redis (Optional for caching / rate limiting)
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
 
   // Upstream AI Provider (OpenAI / OpenRouter / etc.)
   UPSTREAM_PROVIDER?: string;
