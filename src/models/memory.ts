@@ -41,12 +41,20 @@ export function defaultMemoryScores(): MemoryScores {
   };
 }
 
+export type FactScope = "user" | "project" | "session";
+
 export interface StructuredFact {
   entity: string;
   attribute: string;
   value: string;
   memoryType: MemoryType;
   rawText: string;
+  /** Stable structured key such as "user.name" or "project.database". */
+  key?: string;
+  /** USER / PROJECT / SESSION. Derived from the key prefix when not set. */
+  scope?: FactScope;
+  /** True when this fact is an explicit update of a previous value. */
+  isUpdate?: boolean;
 }
 
 export interface Correction {
@@ -72,7 +80,6 @@ export interface CandidateMemory {
   correction?: Correction | null;
   revocation?: Revocation | null;
 }
-
 export interface CanonicalMemorySnapshot {
   facts: string[];
   decisions: string[];

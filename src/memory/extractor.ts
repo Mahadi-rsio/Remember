@@ -10,8 +10,10 @@ import { isInterrogative } from "./interrogative";
 import { isLowInfoMessage } from "./low-info";
 import {
   detectPreferenceDomain,
+  extractStructuredFacts,
   extractStructuredFact,
   slugify,
+  splitSentences,
   structuredFactToContent,
   structuredFactToTopicKey,
   INVALID_KEYS,
@@ -299,6 +301,100 @@ function buildRevocationCandidate(
   return candidate;
 }
 
+export function buildFactCandidate(
+  message: NormalizedMessage,
+  sfact: StructuredFact
+): CandidateMemory | null {
+  let authority = authorityForRole(message.role, message.content);
+  let mtype = sfact.memoryType;
+  if (message.role === "assistant" && (mtype === MemoryType.DECISION || mtype === MemoryType.CONSTRAINT)) {
+    authority = "speculation";
+  }
+
+  const topicKey = structuredFactToTopicKey(sfact);
+
+  const candidate: CandidateMemory = {
+    content: structuredFactToContent(sfact),
+    type: mtype,
+    scores: {
+      confidence: 0,
+      importance: 0,
+      stability: 0,
+      freshness: 1,
+      informationGain: 0,
+    },
+    sourceMessageIds: [message.messageKey],
+    topicKey,
+    authority,
+    isCorrection: looksLikeCorrection(message.content) || Boolean(sfact.isUpdate),
+    structuredFact: sfact,
+  };
+  candidate.scores = scoreCandidate(candidate);
+  return candidate;
+}
+
+const PRONOUN_SWITCH_RE = /^(it|this|that|the\s+project|the\s+app|we|our)$/i;
+
+function attributeForValueSafe(value: string): string {
+  // local classifier to avoid circular dependency; duplicates facts.attributeForValue
+  const v = value.toLowerCase();
+  if (/\b(turso|neon|postgres|postgresql|supabase|mysql|sqlite|libsql|mongodb|mariadb|dynamodb|database|db)\b/.test(v)) return "database";
+  if (/\b(upstash|redis|memcached)\b/.test(v)) return "cache";
+  if (/\b(cloudflare r2|r2|s3|gcs|object storage|storage)\b/.test(v)) return "storage";
+  if (/\b(embedding|semantic|vector|retrieval)\b/.test(v)) return "semantic_retrieval";
+  if (/\b(groq|openai|anthropic|gpt|llama|summariz)\b/.test(v)) return "summarization";
+  if (/\b(hono|next|express|fastify|react|vue)\b/.test(v)) return "framework";
+  if (/\b(cloudflare workers|deno|node|bun|lambda|vercel)\b/.test(v)) return "runtime";
+  return "technology";
+}
+
+// "We switched <X> to <Y>" / "<X> switched to <Y>" -> update fact
+const SWITCHED_TO_RE =
+  /^(?:we\s+|i\s+)?(?:have\s+|have\s+we\s+)?switched\s+(?<target>[\w\s/-]+?)\s+to\s+(?<new>.+?)\s*[.!]?$/i;
+const SWITCHED_BARE_RE =
+  /^(?:we\s+|i\s+)?switched\s+to\s+(?<new>.+?)\s*[.!]?$/i;
+
+function detectSwitchUpdate(text: string): StructuredFact | null {
+  const cleanNew = (raw: string) =>
+    raw
+      .replace(/\s+(?:for|as)\s+(?:the|its|our|a|an)?\s*[a-z0-9 _/-]*$/i, "")
+      .trim();
+
+  let m = text.match(SWITCHED_TO_RE);
+  if (m && m.groups) {
+    const target = m.groups.target.trim();
+    const newVal = cleanNew(m.groups.new.trim());
+    const attr = attributeForValueSafe(newVal);
+    const subject = PRONOUN_SWITCH_RE.test(target.toLowerCase()) ? "project" : target;
+    return {
+      entity: subject,
+      attribute: attr,
+      value: newVal,
+      memoryType: MemoryType.DECISION,
+      rawText: text,
+      key: `project.${slugify(attr)}`,
+      scope: "project",
+      isUpdate: true,
+    };
+  }
+  m = text.match(SWITCHED_BARE_RE);
+  if (m && m.groups) {
+    const newVal = cleanNew(m.groups.new.trim());
+    const attr = attributeForValueSafe(newVal);
+    return {
+      entity: "project",
+      attribute: attr,
+      value: newVal,
+      memoryType: MemoryType.DECISION,
+      rawText: text,
+      key: `project.${slugify(attr)}`,
+      scope: "project",
+      isUpdate: true,
+    };
+  }
+  return null;
+}
+
 export function extractFromMessage(message: NormalizedMessage): CandidateMemory[] {
   if (message.role !== "user" && message.role !== "assistant") {
     return [];
@@ -332,44 +428,78 @@ export function extractFromMessage(message: NormalizedMessage): CandidateMemory[
     }
   }
 
-  const classified = classify(stripped);
-  if (classified === null) {
-    return [];
-  }
+  // Split the message into atomic sentences and extract ALL facts.
+  const sentences = splitSentences(stripped);
+  const out: CandidateMemory[] = [];
+  const seenKeys = new Set<string>();
 
-  const [mtype, body, sfact] = classified;
-  if (message.role === "assistant") {
-    const [typed] = parsePrefix(message.content);
-    if (typed === null) {
-      return [];
+  for (const sentence of sentences) {
+    if (isLowInfoMessage(sentence, message.role) || isInterrogative(sentence)) {
+      continue;
+    }
+    if (message.role === "assistant" && looksSpeculative(sentence)) {
+      continue;
+    }
+
+    const update = detectSwitchUpdate(sentence);
+    if (update) {
+      const candidate = buildFactCandidate(message, update);
+      if (candidate) out.push(candidate);
+      continue;
+    }
+
+    const facts = extractStructuredFacts(sentence);
+    for (const sfact of facts) {
+      const key = sfact.key || structuredFactToTopicKey(sfact);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      const candidate = buildFactCandidate(message, sfact);
+      if (candidate) out.push(candidate);
     }
   }
 
-  let authority = authorityForRole(message.role, message.content);
-  if (message.role === "assistant" && (mtype === MemoryType.DECISION || mtype === MemoryType.CONSTRAINT)) {
-    authority = "speculation";
+  // Fallback: non-structured pattern-based candidates (decision/constraint/...)
+  if (out.length === 0) {
+    const classified = classify(stripped);
+    if (classified === null) {
+      return [];
+    }
+    const [mtype, body, sfact] = classified;
+    if (message.role === "assistant") {
+      const [typed] = parsePrefix(message.content);
+      if (typed === null) {
+        return [];
+      }
+    }
+
+    let authority = authorityForRole(message.role, message.content);
+    if (message.role === "assistant" && (mtype === MemoryType.DECISION || mtype === MemoryType.CONSTRAINT)) {
+      authority = "speculation";
+    }
+
+    const topicKey = sfact !== null ? structuredFactToTopicKey(sfact) : topicKeyFromContent(body, mtype);
+
+    const candidate: CandidateMemory = {
+      content: body,
+      type: mtype,
+      scores: {
+        confidence: 0,
+        importance: 0,
+        stability: 0,
+        freshness: 1,
+        informationGain: 0,
+      },
+      sourceMessageIds: [message.messageKey],
+      topicKey,
+      authority,
+      isCorrection: hadPrefix || looksLikeCorrection(message.content),
+      structuredFact: sfact,
+    };
+    candidate.scores = scoreCandidate(candidate);
+    return [candidate];
   }
 
-  const topicKey = sfact !== null ? structuredFactToTopicKey(sfact) : topicKeyFromContent(body, mtype);
-
-  const candidate: CandidateMemory = {
-    content: body,
-    type: mtype,
-    scores: {
-      confidence: 0,
-      importance: 0,
-      stability: 0,
-      freshness: 1,
-      informationGain: 0,
-    },
-    sourceMessageIds: [message.messageKey],
-    topicKey,
-    authority,
-    isCorrection: hadPrefix || looksLikeCorrection(message.content),
-    structuredFact: sfact,
-  };
-  candidate.scores = scoreCandidate(candidate);
-  return [candidate];
+  return out;
 }
 
 export function extractCandidates(messages: NormalizedMessage[]): CandidateMemory[] {

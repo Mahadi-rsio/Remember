@@ -231,7 +231,18 @@ export function scoreCanonicalItem(
   }
 ): SelectableItem {
   const tokens = estimateTokens(`${item.type}: ${item.content}`) + 2;
-  const relevance = computeRelevance(item.content, options.queryKeywords);
+  let relevance = computeRelevance(item.content, options.queryKeywords);
+
+  // Boost relevance using the structured topicKey (e.g. "project.database",
+  // "user.name"). The attribute segment often matches the query noun even when
+  // the phrasing differs ("what database does it use?" -> "database").
+  if (item.topicKey) {
+    const keyTerms = extractKeywords(item.topicKey.replace(/[._-]/g, " "));
+    const keyRelevance = computeRelevance(item.topicKey, options.queryKeywords);
+    const keyOverlap = [...options.queryKeywords].filter((k) => keyTerms.has(k)).length;
+    const structuredBonus = keyOverlap > 0 ? keyRelevance : 0;
+    relevance = Math.max(relevance, Math.min(1.0, 0.5 + structuredBonus * 0.5));
+  }
 
   return createSelectableItem({
     itemId: `mem-${item.id || options.ordinal}`,

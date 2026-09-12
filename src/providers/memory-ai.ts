@@ -6,6 +6,8 @@ const JSON_BLOCK_RE = /```(?:json)?\s*(?<json>\{.*\}|\[.*\])\s*```/s;
 export const EXTRACTION_SYSTEM_PROMPT = `You are an AI Memory Compressor. Your role is ONLY to extract and compress memory items from conversation messages.
 You NEVER answer the user directly.
 
+Split multi-fact messages into ATOMIC facts. Each fact is ONE independent, self-contained statement (one entity, one attribute, one value). Do not merge multiple facts into a single bullet.
+
 Output strictly valid JSON conforming to this schema:
 {
   "summary": "Brief 1-2 sentence overview of what changed or happened",
@@ -24,9 +26,11 @@ Output strictly valid JSON conforming to this schema:
 
 Rules:
 1. Extract only high-value information.
-2. User statements and explicit decisions have highest authority.
-3. Assistant speculation must NOT be recorded as confirmed facts/decisions.
-4. Output ONLY valid JSON. No commentary outside the JSON.
+2. Each bullet must be a single atomic fact. For example, "Uses Cloudflare Workers, Hono, Turso, Upstash Redis, Groq" must become separate entries, not one.
+3. When the user switches/changes a previously stated value (e.g. "we switched X to Y"), list the new value under the appropriate list and add the old one to "obsolete_items".
+4. User statements and explicit decisions have highest authority.
+5. Assistant speculation must NOT be recorded as confirmed facts/decisions.
+6. Output ONLY valid JSON. No commentary outside the JSON.
 `;
 
 export const TOOL_COMPRESSION_SYSTEM_PROMPT = `You are a Tool Output Compressor. Your role is to summarize tool/command execution output.

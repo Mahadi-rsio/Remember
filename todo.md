@@ -143,7 +143,9 @@ Track work against `plan.md`. Check items as they land.
 - [ ] Out-of-order messages handled
 
 ### 9.3 Memory Engine Unit Tests
-- [ ] Fact extraction: `I am building X.`, `X uses Y.`, `I prefer X.`
+- [x] Fact extraction: `I am building X.`, `X uses Y.`, `I prefer X.`
+- [x] Multi-fact extraction: one message → multiple atomic facts (sentence split + multi-clause `uses` list)
+- [x] Stack update: "switched X to Y" supersedes the old value (e.g. Neon → Turso)
 - [ ] Low-info skip: `ok`, `thanks`, `yes`, `continue`, `sure`
 - [ ] Interrogative skip: `What is my name?`, `Where is the server?`
 - [ ] Merge: same fact → update, not duplicate
