@@ -201,6 +201,8 @@ Track work against `plan.md`. Check items as they land.
 - [x] TTL semantics (`current_error`=3600s, else 7200s)
 - [x] Live Upstash credentials added to `.dev.vars` (URL + token)
 - [x] Live Redis integration tests pass against real Upstash (`tests/redis-context.integration.test.ts`)
+- [x] Live API E2E tests pass against real upstream + Neon + Redis (`tests/live-api.e2e.test.ts`)
+- [x] New skill: `live-api-tests` (how to write real tests with the live API key) (`.agents/skills/live-api-tests/SKILL.md`)
 
 ### 10.3 Long-Term Retrieval
 - [x] `retrieveMemories` / `retrieveActiveMemories` deterministic filters (`src/memory/retrieve.ts`)
@@ -219,7 +221,7 @@ Track work against `plan.md`. Check items as they land.
 - [x] Analyzer unit tests (`tests/analyzer.test.ts`)
 - [x] Context store unit tests (memory + Redis adapters) (`tests/context-store.test.ts`)
 - [x] Full integration: single memory, multiple memories, temporary context, discarded noise, duplicate, update, contradiction, historical state, user/project scope, Redis TTL/context, retrieval, context composition (`tests/short-term-long-term.integration.test.ts`)
-- [x] Full suite green: 92 pass / 0 fail (incl. live Redis)
+- [x] Full suite green: 98 pass / 0 fail (incl. live Redis + live API E2E)
 
 ---
 
