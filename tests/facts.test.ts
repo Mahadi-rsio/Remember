@@ -34,6 +34,40 @@ describe("Deterministic Fact Extraction", () => {
     expect(fact?.memoryType).toBe(MemoryType.PREFERENCE);
   });
 
+  it("extracts affect preferences (love/like/hate)", () => {
+    const cases: Array<[string, string, string]> = [
+      ["I love red", "favorite_color", "red"],
+      ["I really like TypeScript", "language", "TypeScript"],
+      ["I hate MongoDB", "disliked_database", "MongoDB"],
+      ["I love blue now", "favorite_color", "blue"],
+      ["My favorite colour is green", "favorite_color", "green"],
+      ["My preferred database is Neon", "preferred_database", "Neon"],
+    ];
+    for (const [phrase, predicate, value] of cases) {
+      const fact = extractStructuredFact(phrase);
+      expect(fact).not.toBeNull();
+      expect(fact?.memoryType).toBe(MemoryType.PREFERENCE);
+      expect(fact?.scope).toBe("user");
+      expect(fact?.entity).toBe("user");
+      expect(fact?.attribute).toBe(predicate);
+      expect(fact?.value).toBe(value);
+    }
+  });
+
+  it("does not extract reaction / discourse preferences", () => {
+    expect(extractStructuredFact("I love this response")).toBeNull();
+    expect(extractStructuredFact("I like how you explained that")).toBeNull();
+    expect(extractStructuredFact("I love this")).toBeNull();
+  });
+
+  it("detects color preference domain (excluding rust)", () => {
+    expect(detectPreferenceDomain("red")).toEqual([
+      "favorite_color",
+      "preference:favorite_color",
+    ]);
+    expect(detectPreferenceDomain("rust")[0]).toBe("language");
+  });
+
   it("extracts possessive statements", () => {
     const fact = extractStructuredFact("Cloudisy's architecture is event-driven microservices");
     expect(fact).not.toBeNull();

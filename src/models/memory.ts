@@ -186,19 +186,58 @@ export function snapshotFromItems(items: Array<{ type: string; content: string }
   return snapshot;
 }
 
-export interface MemoryAIOutput {
-  summary: string;
-  facts: string[];
-  decisions: string[];
-  constraints: string[];
-  preferences: string[];
-  goals: string[];
-  architecture: string[];
-  important_events: string[];
-  active_tasks: string[];
-  obsolete_items: string[];
-  contradictions: string[];
+export interface MemoryAICandidate {
+  action: "NEW" | "REINFORCE" | "SUPERSEDES" | "CONTRADICTS" | "UPDATE" | "DISCARD";
+  destination: "STORE" | "CONTEXT" | "DISCARD";
+  type: string;
+  scope: "USER" | "PROJECT" | "SESSION";
+  subject: string;
+  predicate: string;
+  value: string;
+  topicKey: string;
   confidence: number;
+  importance: number;
+  stability: "permanent" | "long-term" | "short-term" | "session";
+  ttl_hours: number | null;
+  supersedes_id: string | null;
+  reinforces_id: string | null;
+  informationGain: number;
+  rawText: string;
+}
+
+/** Validated Memory AI extraction result (array of structured candidates). */
+export interface MemoryAIOutput {
+  candidates: MemoryAICandidate[];
+  /** Derived from SUPERSEDES / CONTRADICTS for engine obsolete marking. */
+  obsolete_items: string[];
+}
+
+/** One consolidated memory produced by the consolidation engine. */
+export interface ConsolidatedMemory {
+  type: string;
+  scope: "USER" | "PROJECT" | "SESSION";
+  subject: string;
+  predicate: string;
+  value: string | Record<string, unknown>;
+  topicKey: string;
+  confidence: number;
+  importance: number;
+  stability: "permanent" | "long-term" | "short-term" | "session";
+  sourceMemoryIds: string[];
+  consolidationNote?: string;
+}
+
+export interface ConsolidationConflict {
+  memory_ids: string[];
+  description: string;
+  resolution: string;
+}
+
+/** Result of consolidating one related memory cluster. */
+export interface ConsolidationResult {
+  consolidated: ConsolidatedMemory[];
+  superseded_ids: string[];
+  conflicts_detected: ConsolidationConflict[];
 }
 
 export interface ToolSummaryOutput {

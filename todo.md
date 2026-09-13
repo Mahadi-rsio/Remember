@@ -225,6 +225,34 @@ Track work against `plan.md`. Check items as they land.
 
 ---
 
+## Phase 11 — Preference Promotion to Long-Term Memory ✅
+
+> **Goal:** Promote explicit, stable user preferences (`I love red`, `My favorite color is …`) into durable `memory_items` SPV triples; discard reaction noise (`I love this response`); supersede on preference updates.
+
+- [x] Color domain in `detectPreferenceDomain` (`favorite_color`; exclude `rust`)
+- [x] `extractFavoriteIs` — favorite/favourite/preferred \<attr\> is \<val\>
+- [x] `extractAffectPreference` — love/like/enjoy/adore/hate/dislike (+ don't like); anti-over-store + temporal strip + `disliked_*` namespace
+- [x] Analyzer discard guard for preference noise values
+- [x] Selector spelling normalization (`favourite`/`colour`)
+- [x] Memory AI prompt/schema aligned with `promt.md` (JSON array candidates)
+- [x] Unit tests (`facts.test.ts`, `analyzer.test.ts`)
+- [x] Integration tests (`tests/preference-persistence.integration.test.ts`)
+
+---
+
+## Phase 12 — Memory Consolidation Engine ✅
+
+> **Goal:** Compress related atomic memories (e.g. 4 stack preferences) into one higher-quality ARCHITECTURE record to save context tokens and improve retrieval.
+
+- [x] Consolidation types (`ConsolidatedMemory`, `ConsolidationResult`) in `src/models/memory.ts`
+- [x] Deterministic cluster detection + merge (`src/memory/consolidator.ts`)
+- [x] Memory AI consolidation prompt + `consolidateCluster` (`src/providers/memory-ai.ts`)
+- [x] Apply path: insert consolidated, mark sources SUPERSEDED; fail-open
+- [x] Wired into memory engine after writes (deterministic; Memory AI when enabled)
+- [x] Unit + integration tests (`tests/consolidation.test.ts`, `tests/consolidation.integration.test.ts`)
+
+---
+
 ## Explicit Non-Goals
 
 - [ ] ~~Docker / server deployment~~ (Cloudflare Workers only)

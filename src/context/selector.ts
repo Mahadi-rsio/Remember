@@ -19,7 +19,12 @@ const STOPWORDS: ReadonlySet<string> = new Set([
 ]);
 
 export function extractKeywords(text: string): Set<string> {
-  const words = text.toLowerCase().match(WORD_RE) || [];
+  const normalized = text
+    .toLowerCase()
+    .replace(/\bfavourite\b/g, "favorite")
+    .replace(/\bcolour\b/g, "color")
+    .replace(/\borganise\b/g, "organize");
+  const words = normalized.match(WORD_RE) || [];
   return new Set(words.filter((w) => w.length > 2 && !STOPWORDS.has(w)));
 }
 

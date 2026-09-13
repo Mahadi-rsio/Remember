@@ -8,6 +8,7 @@ import { isLowInfoMessage } from "./low-info";
 import { analyzeCandidates } from "./analyzer";
 import { memoryAiOutputToCandidates } from "./compressor";
 import {
+  latestContextVersion,
   listMemoryItems,
   markItemsObsolete,
   memoryChanged,
@@ -16,6 +17,7 @@ import {
 } from "./state";
 import { MemoryStatus, snapshotFromItems } from "../models/memory";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
+import { runConsolidationPass } from "./consolidator";
 
 export interface MemoryUpdateResult {
   userId: string;
@@ -27,6 +29,8 @@ export interface MemoryUpdateResult {
   applied: ApplyResult[];
   obsoleteMarked: number;
   contextVersion?: number | null;
+  consolidated?: number;
+  consolidationSuperseded?: number;
   error?: string | null;
 }
 
@@ -36,6 +40,8 @@ export async function processMemoryDelta(
   options?: {
     memoryAiOutput?: MemoryAIOutput | null;
     contextStore?: ShortTermContextStore | null;
+    /** Optional Memory AI for cluster consolidation (falls back to deterministic). */
+    memoryAi?: MemoryAIAdapter | null;
   }
 ): Promise<MemoryUpdateResult | null> {
   const base = {
@@ -121,6 +127,22 @@ export async function processMemoryDelta(
       versionNum = await writeContextVersion(db, delta.userId, sourceIds);
     }
 
+    // Consolidation after writes — deterministic by default; Memory AI optional.
+    let consolidated = 0;
+    let consolidationSuperseded = 0;
+    try {
+      const pass = await runConsolidationPass(db, delta.userId, {
+        memoryAi: options?.memoryAi ?? null,
+      });
+      consolidated = pass.created;
+      consolidationSuperseded = pass.superseded;
+      if (consolidated > 0 && versionNum == null) {
+        versionNum = await latestContextVersion(db, delta.userId);
+      }
+    } catch {
+      // fail-open
+    }
+
     return {
       userId: delta.userId,
       candidates: candidates.length,
@@ -130,6 +152,8 @@ export async function processMemoryDelta(
       applied: results,
       obsoleteMarked: obsoleteCount,
       contextVersion: versionNum,
+      consolidated,
+      consolidationSuperseded,
     };
   } catch (err: any) {
     return {
@@ -205,5 +229,6 @@ export async function processMemoryDeltaAsync(
   return await processMemoryDelta(db, delta, {
     memoryAiOutput: aiOutput,
     contextStore: options?.contextStore,
+    memoryAi: memoryAi ?? null,
   });
 }

@@ -102,4 +102,32 @@ describe("Memory Analyzer classification", () => {
     ]);
     expect(result.contextEntries[0].ttlSeconds).toBe(3600);
   });
+
+  it("stores durable affect preferences", () => {
+    const c = candidate({
+      content: "red",
+      type: MemoryType.PREFERENCE,
+      value: "red",
+      topicKey: "preference:favorite_color",
+      structuredFact: {
+        entity: "user",
+        attribute: "favorite_color",
+        value: "red",
+        memoryType: MemoryType.PREFERENCE,
+        rawText: "I love red",
+        scope: "user",
+      },
+    });
+    expect(classifyCandidate(c)).toBe(MemoryBucket.STORE);
+  });
+
+  it("discards preference candidates with demonstrative / discourse values", () => {
+    const c = candidate({
+      content: "this response",
+      type: MemoryType.PREFERENCE,
+      value: "this response",
+      topicKey: "preference:this_response",
+    });
+    expect(classifyCandidate(c)).toBe(MemoryBucket.DISCARD);
+  });
 });

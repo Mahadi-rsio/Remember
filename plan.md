@@ -149,6 +149,52 @@ Build a production-oriented **AI Memory Gateway / Context Compression Proxy** in
 
 **Exit criteria:** all tests pass with `bun test`; coverage matches Python version's 158 tests.
 
+### Phase 11 — Preference Promotion to Long-Term Memory (Current)
+
+**Goal:** Correctly promote explicit, stable user preferences from temporary Redis context into durable `memory_items` records (subject/predicate/value triples) so they can be recalled later.
+
+**Problem:** "I love red" is not durable. `PREFER_RE` only matches "prefer/would rather/preference"; no extractor handles affect verbs, so "I love red", "I really like TypeScript", "I hate MongoDB", "I love blue now" produce **zero candidates** and never reach `persistCandidates`. Explicit "My favorite color is red" / "My preferred database is Neon" are extracted by `extractTheYIsX` but mis-typed (`fact`/`decision`) and mis-scoped (`project`).
+
+**Design invariants (requirement 4):**
+- Preserve the pipeline: `raw message → deterministic extraction → analyzer/classifier → store/context/discard → persistent memory + Redis context`.
+- Deterministic regex extraction only. **No uncontrolled LLM call** in the analyzer.
+- No embeddings. No schema changes. Reuse the existing supersede/contradiction path.
+
+**Tasks:**
+- [x] `src/memory/facts.ts` — `detectPreferenceDomain`: add color domain → `favorite_color` / `preference:favorite_color` (exclude "rust" — clashes with the language keyword).
+- [x] `src/memory/facts.ts` — new `extractFavoriteIs` (runs before `extractTheYIsX`): "my favorite|favourite|preferred \<attr\> is \<val\>" → `type=preference`, `entity=user`, `scope=user`, predicate `favorite_<attr>` / `preferred_<attr>` (colour→color normalized).
+- [x] `src/memory/facts.ts` — new `extractAffectPreference`: "I (really)? love|like|enjoy|adore|hate|dislike \<X\>" → preference, user scope.
+  - Anti-over-store guard (req 3): strip leading article; reject demonstrative (`this/that/these/those/it`), discourse nouns (`response, answer, reply, message, error, bug, result, output, suggestion, idea, solution, explanation`), and question words → "I love this response" yields no fact.
+  - Strip trailing temporal adverbs ("now", "these days", "anymore") → "I love blue now" → value `blue`.
+  - Negatives → predicate `disliked_<domain>` with its own topic key (no false supersede of positive preferences); `structuredFactToTopicKey` honors the `disliked_` attribute.
+- [x] `src/memory/analyzer.ts` — `classifyCandidate` discards PREFERENCE candidates whose value matches the demonstrative/discourse-noun guard (defense in depth; also covers LLM-injected candidates).
+- [x] `src/context/selector.ts` — `extractKeywords` normalizes `favourite→favorite`, `colour→color` so "What is my favourite colour?" matches predicate `favorite_color` via existing LIKE retrieval.
+- [x] Tests — unit (`facts.test.ts`, `analyzer.test.ts`): 6 positive phrases → preference/user/correct predicate; 3 negative phrases → no fact; bucket `store`.
+- [x] Tests — `tests/preference-persistence.integration.test.ts` (live Neon): "I love red" → `memory_items` row (`user`, `favorite_color`, `red`, active); "What is my favourite color?" → compiled context contains "red"; "I love this response" → no new rows; "I love blue now" → blue active + `supersedesId`, red `superseded`; recall returns blue.
+- [x] `todo.md` — mark the corresponding correctness item(s) complete.
+- [x] Memory AI extraction prompt (`src/providers/memory-ai.ts`) updated to `promt.md` JSON-array contract.
+**Expected structured output (per req 2, following existing models):**
+```json
+{ "bucket": "store", "memoryType": "preference", "scope": "user",
+  "subject": "user", "predicate": "favorite_color", "value": "red", "confidence": "high" }
+```
+
+**Unchanged:** `contradiction.ts`, `state.ts`, `engine.ts`, DB schema, routes — supersede fires automatically via the existing same-`topicKey` contradiction path; `content` stays value-only per the existing preference convention.
+
+**Exit criteria:** `bun run typecheck` passes; `bun test` (unit + live-Neon integration with `.dev.vars` sourced) green; "I love red" persists and is recalled; "I love this response" is not stored; "I love blue now" supersedes red.
+
+### Phase 12 — Memory Consolidation Engine ✅
+
+**Goal:** Compress clusters of related atomic memories into one (or two) higher-quality consolidated records so the context compiler retrieves fewer, denser items.
+
+**Tasks:**
+- [x] Consolidation types + deterministic `consolidator.ts` (tech_stack clustering, conflict-by-confidence, structured values)
+- [x] Memory AI `CONSOLIDATION_SYSTEM_PROMPT` + `consolidateCluster` with retry-once parse
+- [x] Apply consolidated rows; supersede source ids; fail-open; engine wiring after writes
+- [x] Unit + Neon integration tests
+
+**Exit criteria:** 4+ stack preferences consolidate into `user.tech_stack` ARCHITECTURE; sources SUPERSEDED; compiled context still recalls language/database.
+
 ## Non-Goals
 
 - Docker / server deployment (Cloudflare Workers only).

@@ -15,6 +15,7 @@ import {
   type CandidateMemory,
   type FactScope,
 } from "../models/memory";
+import { isPreferenceNoiseValue } from "./facts";
 
 /** Markers that signal transient, currently-happening information. */
 const CONTEXT_MARKERS =
@@ -132,6 +133,14 @@ export function classifyCandidate(candidate: CandidateMemory): MemoryBucket {
   // Pure filler / acknowledgement noise → discard entirely.
   if (isNoise(lower)) {
     return MemoryBucket.DISCARD;
+  }
+
+  // Preference over-store guard: "I love this response" / demonstrative values.
+  if (candidate.type === MemoryType.PREFERENCE) {
+    const prefValue = candidate.value || candidate.structuredFact?.value || text;
+    if (isPreferenceNoiseValue(prefValue)) {
+      return MemoryBucket.DISCARD;
+    }
   }
 
   // Explicitly-flagged temporary / transient information → context.

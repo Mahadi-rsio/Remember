@@ -106,6 +106,7 @@ src/
 │   ├── interrogative.ts  # Question classifier (no extraction)
 │   ├── low-info.ts       # Low-info message filter
 │   ├── facts.ts          # Declarative fact patterns
+│   ├── consolidator.ts   # Cluster merge → consolidated memories
 │   ├── state.ts          # Canonical memory CRUD + versioning
 │   ├── ids.ts            # Message ID extraction + hash fallback
 │   └── isolation.ts      # Conversation / user isolation keys
@@ -248,25 +249,44 @@ Separate scores — do not collapse into one metric. Explicit user decisions out
 
 ## Memory AI Contract
 
-When enabled, Memory AI returns **strict JSON** (Zod-validated):
+When enabled, Memory AI returns a **strict JSON array** of extraction candidates (Zod-/schema-validated), per `promt.md`:
 
 ```json
-{
-  "summary": "...",
-  "facts": [],
-  "decisions": [],
-  "constraints": [],
-  "preferences": [],
-  "goals": [],
-  "obsolete_items": [],
-  "contradictions": [],
-  "confidence": 0.92
-}
+[
+  {
+    "action": "NEW",
+    "destination": "STORE",
+    "type": "PREFERENCE",
+    "scope": "USER",
+    "subject": "user",
+    "predicate": "favorite_color",
+    "value": "red",
+    "topicKey": "user.favorite_color",
+    "confidence": 0.9,
+    "importance": 0.8,
+    "stability": "long-term",
+    "ttl_hours": null,
+    "supersedes_id": null,
+    "reinforces_id": null,
+    "informationGain": 0.9,
+    "rawText": "I love red"
+  }
+]
 ```
 
 On parse failure: retry once if configured; otherwise keep previous memory; never corrupt canonical state.
 
 Memory AI must **not** generate the user's final answer.
+
+When consolidating clusters, Memory AI (or the deterministic consolidator) returns:
+
+```json
+{
+  "consolidated": [{ "type": "ARCHITECTURE", "predicate": "tech_stack", "value": {}, "topicKey": "user.tech_stack", "sourceMemoryIds": [] }],
+  "superseded_ids": [],
+  "conflicts_detected": []
+}
+```
 
 ## Failure Isolation
 

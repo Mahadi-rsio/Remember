@@ -123,6 +123,81 @@ const WORKFLOW_KEYWORDS = new Set([
   "workflow",
 ]);
 
+const RUNTIME_KEYWORDS = new Set([
+  "cloudflare",
+  "workers",
+  "deno",
+  "node",
+  "nodejs",
+  "bun",
+  "lambda",
+  "vercel",
+  "netlify",
+  "edge",
+]);
+
+const FRAMEWORK_KEYWORDS = new Set([
+  "hono",
+  "express",
+  "fastify",
+  "flask",
+  "django",
+  "fastapi",
+  "rails",
+  "spring",
+  "sveltekit",
+]);
+
+/** Color names for preference domain. "rust" excluded — clashes with the language. */
+const COLOR_KEYWORDS = new Set([
+  "red",
+  "blue",
+  "green",
+  "yellow",
+  "orange",
+  "purple",
+  "pink",
+  "black",
+  "white",
+  "gray",
+  "grey",
+  "brown",
+  "cyan",
+  "magenta",
+  "violet",
+  "indigo",
+  "teal",
+  "navy",
+  "maroon",
+  "beige",
+  "gold",
+  "silver",
+]);
+
+/** Demonstratives / discourse nouns that are reactions, not durable preferences. */
+export const PREFERENCE_NOISE_VALUES: ReadonlySet<string> = new Set([
+  "this",
+  "that",
+  "these",
+  "those",
+  "it",
+  "response",
+  "answer",
+  "reply",
+  "message",
+  "error",
+  "bug",
+  "result",
+  "output",
+  "suggestion",
+  "idea",
+  "solution",
+  "explanation",
+]);
+
+const TEMPORAL_TRAILING_RE =
+  /\s+(?:now|these\s+days|anymore|lately|currently|today|recently)\s*$/i;
+
 function setIntersect<T>(a: Set<T>, b: Set<T>): boolean {
   for (const item of a) {
     if (b.has(item)) return true;
@@ -130,8 +205,39 @@ function setIntersect<T>(a: Set<T>, b: Set<T>): boolean {
   return false;
 }
 
+/** Normalize British spelling variants used in preference attributes. */
+export function normalizePreferenceSpelling(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\bfavourite\b/g, "favorite")
+    .replace(/\bcolour\b/g, "color")
+    .replace(/\borganise\b/g, "organize");
+}
+
+/**
+ * True when a preference value is demonstrative / discourse noise
+ * ("this response", "that answer") rather than a durable preference target.
+ */
+export function isPreferenceNoiseValue(value: string): boolean {
+  const cleaned = value
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:a|an|the)\s+/, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  if (!cleaned) return true;
+  const words = cleaned.match(/[a-z0-9+#.-]+/g) || [];
+  if (words.length === 0) return true;
+  if (words.some((w) => INVALID_KEYS.has(w))) return true;
+  // Leading demonstrative ("this response", "that") → noise.
+  if (["this", "that", "these", "those", "it"].includes(words[0]!)) return true;
+  // Pure discourse noun ("response", "suggestion") → noise.
+  if (words.every((w) => PREFERENCE_NOISE_VALUES.has(w))) return true;
+  return false;
+}
+
 export function detectPreferenceDomain(choice: string, other = ""): [string, string] {
-  const combined = `${choice} ${other}`.toLowerCase();
+  const combined = normalizePreferenceSpelling(`${choice} ${other}`);
   const words = new Set(combined.match(/[a-z0-9+#.-]+/g) || []);
 
   if (setIntersect(words, UI_KEYWORDS) || combined.includes("ui library") || words.has("ui")) {
@@ -151,6 +257,20 @@ export function detectPreferenceDomain(choice: string, other = ""): [string, str
   }
   if (setIntersect(words, WORKFLOW_KEYWORDS)) {
     return ["workflow", "preference:workflow"];
+  }
+  if (
+    setIntersect(words, RUNTIME_KEYWORDS) ||
+    combined.includes("runtime") ||
+    combined.includes("cloudflare workers")
+  ) {
+    return ["runtime", "preference:runtime"];
+  }
+  if (setIntersect(words, FRAMEWORK_KEYWORDS) || combined.includes("framework")) {
+    return ["framework", "preference:framework"];
+  }
+  // Color domain last among known domains; exclude "rust" (language keyword).
+  if (setIntersect(words, COLOR_KEYWORDS) || words.has("color")) {
+    return ["favorite_color", "preference:favorite_color"];
   }
 
   const cSlug = slugify(choice);
@@ -190,6 +310,19 @@ export function structuredFactToContent(fact: StructuredFact): string {
 
 export function structuredFactToTopicKey(fact: StructuredFact): string {
   if (fact.memoryType === MemoryType.PREFERENCE) {
+    const attr = normalizePreferenceSpelling(fact.attribute || "");
+    // Explicit favorite_/preferred_/disliked_ predicates keep their own topic keys
+    // so positives and negatives never false-supersede each other.
+    if (
+      attr.startsWith("disliked_") ||
+      attr.startsWith("favorite_") ||
+      attr.startsWith("preferred_")
+    ) {
+      return `preference:${slugify(attr)}`;
+    }
+    if (attr && attr !== "preference") {
+      return `preference:${slugify(attr)}`;
+    }
     const [, topic] = detectPreferenceDomain(fact.value);
     return topic;
   }
@@ -339,7 +472,86 @@ export function extractPreference(text: string): StructuredFact | null {
   };
 }
 
-// 5. "The Y is X"
+// 5. "My favorite|favourite|preferred <attr> is <val>"
+const FAVORITE_IS_RE =
+  /^\s*(?:my\s+)?(?<kind>favorite|favourite|preferred)\s+(?<attr>[A-Za-z][\w\s/-]{0,30}?)\s+(?:is|are|=|:)\s+(?<val>.+?)\s*[.!?]?$/i;
+
+export function extractFavoriteIs(text: string): StructuredFact | null {
+  const m = text.match(FAVORITE_IS_RE);
+  if (!m || !m.groups) return null;
+
+  const kindRaw = m.groups.kind.toLowerCase();
+  const kind = kindRaw === "favourite" ? "favorite" : kindRaw === "preferred" ? "preferred" : "favorite";
+  let attr = normalizePreferenceSpelling(m.groups.attr.trim());
+  attr = slugify(attr);
+  if (!attr || INVALID_KEYS.has(attr)) return null;
+
+  let val = cleanVal(m.groups.val);
+  val = val.replace(TEMPORAL_TRAILING_RE, "").trim();
+  if (!val || isPreferenceNoiseValue(val)) return null;
+
+  const predicate = `${kind}_${attr}`;
+  return {
+    entity: "user",
+    attribute: predicate,
+    value: val,
+    memoryType: MemoryType.PREFERENCE,
+    rawText: text,
+    key: `user.${predicate}`,
+    scope: "user",
+  };
+}
+
+// 6. "I (really)? love|like|enjoy|adore|hate|dislike X" / "I don't like X"
+const AFFECT_PREF_RE =
+  /^\s*i\s+(?:(?:do\s+not|don't|dont)\s+(?:really\s+)?(?<negVerb>like|love|enjoy|prefer)|(?:really\s+)?(?<verb>love|like|enjoy|adore|hate|dislike))\s+(?<val>.+?)\s*[.!?]?$/i;
+
+export function extractAffectPreference(text: string): StructuredFact | null {
+  const m = text.match(AFFECT_PREF_RE);
+  if (!m || !m.groups) return null;
+
+  const negVerb = m.groups.negVerb?.toLowerCase();
+  const verb = (m.groups.verb || negVerb || "").toLowerCase();
+  const isNegative =
+    Boolean(negVerb) || verb === "hate" || verb === "dislike";
+
+  let val = cleanVal(m.groups.val);
+  val = val.replace(TEMPORAL_TRAILING_RE, "").trim();
+  // Strip a single leading article for domain detection / storage.
+  val = val.replace(/^(?:a|an|the)\s+/i, "").trim();
+  if (!val || isPreferenceNoiseValue(val)) return null;
+
+  const [domain] = detectPreferenceDomain(val);
+  let attribute: string;
+  if (isNegative) {
+    // Map favorite_color → disliked_color; plain domains → disliked_<domain>.
+    const base =
+      domain === "favorite_color"
+        ? "color"
+        : domain === "preference"
+          ? slugify(val)
+          : domain;
+    attribute = `disliked_${base}`;
+  } else if (domain === "favorite_color") {
+    attribute = "favorite_color";
+  } else if (domain === "preference") {
+    attribute = slugify(val);
+  } else {
+    attribute = domain;
+  }
+
+  return {
+    entity: "user",
+    attribute,
+    value: val,
+    memoryType: MemoryType.PREFERENCE,
+    rawText: text,
+    key: `user.${attribute}`,
+    scope: "user",
+  };
+}
+
+// 7. "The Y is X"
 const THE_Y_IS_X_RE =
   /^\s*(?:(?:temporary\s+detail|note|detail)\s*[:\s-]\s*)?(?:the\s+|my\s+)?(?<attr>[A-Za-z][\w\s/-]{0,35}?)\s*(?:=| is | are | was |:=|:)\s*(?<val>.+?)\s*[.!?]?$/i;
 
@@ -392,7 +604,9 @@ export function extractStructuredFact(text: string): StructuredFact | null {
   return (
     extractBuilding(cleaned) ||
     extractPossessive(cleaned) ||
+    extractFavoriteIs(cleaned) ||
     extractPreference(cleaned) ||
+    extractAffectPreference(cleaned) ||
     extractUses(cleaned) ||
     extractTheYIsX(cleaned) ||
     null
