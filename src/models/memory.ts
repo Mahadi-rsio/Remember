@@ -43,6 +43,22 @@ export function defaultMemoryScores(): MemoryScores {
 
 export type FactScope = "user" | "project" | "session";
 
+/** Three-way classification from the Memory Analyzer. */
+export enum MemoryBucket {
+  STORE = "store",
+  CONTEXT = "context",
+  DISCARD = "discard",
+}
+
+/** Short-term context entry stored in Redis / ephemeral store. */
+export interface ContextEntry {
+  key: string;
+  value: string;
+  /** Seconds from write time before the entry expires. 0 = no expiry. */
+  ttlSeconds?: number;
+  createdAt?: string;
+}
+
 export interface StructuredFact {
   entity: string;
   attribute: string;
@@ -76,6 +92,16 @@ export interface CandidateMemory {
   topicKey: string;
   authority: "user" | "assistant" | "speculation";
   isCorrection: boolean;
+  /** Classification decided by the Memory Analyzer. */
+  bucket?: MemoryBucket;
+  subject?: string;
+  predicate?: string;
+  value?: string;
+  scope?: FactScope;
+  /** ISO timestamp of when this candidate becomes/claims to be valid. */
+  validFrom?: string | null;
+  /** ISO timestamp after which this candidate should no longer be treated as current. */
+  validUntil?: string | null;
   structuredFact?: StructuredFact | null;
   correction?: Correction | null;
   revocation?: Revocation | null;

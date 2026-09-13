@@ -136,6 +136,10 @@ export function mergeIntoExisting(item: MemoryItem, candidate: CandidateMemory):
   item.stability = Math.min(1.0, Math.max(item.stability, candidate.scores.stability) + 0.08);
   item.freshness = Math.max(item.freshness, candidate.scores.freshness);
   item.informationGain = candidate.scores.informationGain;
+  if (candidate.subject) item.subject = candidate.subject;
+  if (candidate.predicate) item.predicate = candidate.predicate;
+  if (candidate.value) item.value = candidate.value;
+  if (candidate.scope) item.scope = candidate.scope;
   item.updatedAt = new Date().toISOString();
   return item;
 }
@@ -230,6 +234,10 @@ export async function applyCandidate(
           content: candidate.content,
           type: candidate.type,
           topicKey: candidate.topicKey,
+          subject: candidate.subject || "",
+          predicate: candidate.predicate || "",
+          value: candidate.value || "",
+          scope: candidate.scope || "project",
           confidence: candidate.scores.confidence,
           importance: candidate.scores.importance,
           stability: candidate.scores.stability,
@@ -238,6 +246,8 @@ export async function applyCandidate(
           sourceMessageIdsJson: dumpSourceIds(candidate.sourceMessageIds),
           status: MemoryStatus.ACTIVE,
           version: target.version + 1,
+          validFrom: candidate.validFrom || nowIso,
+          validUntil: candidate.validUntil ?? null,
           createdAt: nowIso,
           updatedAt: nowIso,
         })
@@ -261,6 +271,10 @@ export async function applyCandidate(
         .update(memoryItems)
         .set({
           sourceMessageIdsJson: item.sourceMessageIdsJson,
+          subject: item.subject,
+          predicate: item.predicate,
+          value: item.value,
+          scope: item.scope,
           confidence: item.confidence,
           importance: item.importance,
           stability: item.stability,
@@ -298,6 +312,10 @@ export async function applyCandidate(
           content: candidate.content,
           type: candidate.type,
           topicKey: candidate.topicKey,
+          subject: candidate.subject || "",
+          predicate: candidate.predicate || "",
+          value: candidate.value || "",
+          scope: candidate.scope || "project",
           confidence: candidate.scores.confidence,
           importance: candidate.scores.importance,
           stability: candidate.scores.stability,
@@ -306,6 +324,8 @@ export async function applyCandidate(
           sourceMessageIdsJson: dumpSourceIds(candidate.sourceMessageIds),
           status: MemoryStatus.ACTIVE,
           version: item.version + 1,
+          validFrom: candidate.validFrom || nowIso,
+          validUntil: candidate.validUntil ?? null,
           createdAt: nowIso,
           updatedAt: nowIso,
         })
@@ -344,6 +364,10 @@ export async function applyCandidate(
       content: candidate.content,
       type: candidate.type,
       topicKey: candidate.topicKey,
+      subject: candidate.subject || "",
+      predicate: candidate.predicate || "",
+      value: candidate.value || "",
+      scope: candidate.scope || "project",
       confidence: candidate.scores.confidence,
       importance: candidate.scores.importance,
       stability: candidate.scores.stability,
@@ -352,6 +376,8 @@ export async function applyCandidate(
       sourceMessageIdsJson: dumpSourceIds(candidate.sourceMessageIds),
       status: MemoryStatus.ACTIVE,
       version: 1,
+      validFrom: candidate.validFrom || nowIso,
+      validUntil: candidate.validUntil ?? null,
       createdAt: nowIso,
       updatedAt: nowIso,
     })

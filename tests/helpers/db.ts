@@ -7,6 +7,7 @@ import { messages } from "../../src/db/schema/messages";
 import { memoryItems } from "../../src/db/schema/memory";
 import { contextVersions } from "../../src/db/schema/context";
 import { corrections } from "../../src/db/schema/corrections";
+import { MemoryContextStore } from "../../src/memory/context-store";
 
 const TABLES = [users, messages, memoryItems, contextVersions, corrections];
 
@@ -40,4 +41,11 @@ export async function createTestDb(): Promise<AppDatabase> {
   }
 
   return db;
+}
+
+/**
+ * Creates a fresh, isolated in-memory short-term context store for a test.
+ */
+export function createTestContextStore(): MemoryContextStore {
+  return new MemoryContextStore();
 }

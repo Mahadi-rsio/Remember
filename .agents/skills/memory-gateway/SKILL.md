@@ -6,7 +6,9 @@ description: >-
   implementing, refactoring, testing, documenting, or checking status of the
   Memory Gateway / context compression proxy; when the user mentions phases,
   todo.md, plan.md, architecture, PROMT.md, OpenAI-compatible proxy, delta
-  detection, context compiler, or Memory AI.
+  detection, context compiler, Memory AI, memory analyzer, three-way
+  classification, store/context/discard, short-term, long-term, Redis,
+  subject/predicate/value, structured memory, retrieval, or context composer.
 ---
 
 # Memory Gateway — Project Steering
@@ -32,10 +34,12 @@ Do **not** re-read all docs every turn; load only what the task needs.
 2. Main upstream AI is mandatory for answers; Memory AI never answers the user.
 3. Not conventional RAG-first; loop is `Context[n] + delta → memory → Context[n+1]`.
 4. Raw archive is authoritative; compact memory is derived and repairable.
-5. Memory failures must not break main AI forwarding.
-6. MVP: Neon (PostgreSQL); Upstash Redis optional only.
+5. Memory failures must not break main AI forwarding (fail-open everywhere: PostgreSQL, Redis, Memory AI, retrieval).
+6. **Dual-store memory:** durable facts → PostgreSQL as structured subject/predicate/value triples; transient "what's happening now" state → Redis (short-term) with TTL. Redis is optional only as a dependency — when absent, fall back to the in-memory store (never break the main path).
 7. No MCP / custom client SDKs required — clients only change `base_url`.
 8. No Docker. No Python. Cloudflare Workers only.
+9. No embeddings / vector DB / graph DB yet — retrieval is deterministic (predicate/keyword/scope filters), not semantic.
+10. Preserve history: supersede/revoke, never delete; keep `MemoryStatus` lifecycle (`active | superseded | revoked | expired | obsolete`).
 
 ## Phase order (do not skip ahead)
 
@@ -51,6 +55,7 @@ Do **not** re-read all docs every turn; load only what the task needs.
 | 7 | Security, hardening, README | ✅ Done |
 | 8 | Memory correctness (FIX.md) — interrogative noise, correction/revocation, false-memory, conflict resolution | ✅ Done |
 | 9 | **TypeScript test suite parity** — proxy identity, delta, memory engine, correction/revocation, context compiler, isolation, fail-open, e2e smoke | 🔲 Current |
+| 10 | **Short-term + long-term memory architecture** — three-way analyzer (`store`/`context`/`discard`), structured SPV triples in PostgreSQL, short-term Redis context w/ TTL, context composer merges both, deterministic retrieval | ✅ Done |
 
 Work the **lowest incomplete phase**. Only touch a later phase if the user explicitly asks or a blocker requires a thin stub.
 
@@ -65,6 +70,16 @@ bun run db:migrate         # apply Neon migrations
 bun run db:generate        # generate Drizzle migrations
 bun run db:studio          # open Drizzle Studio
 ```
+
+> **Integration tests need live services.** Source the env before running:
+> `export $(grep -E '^(DATABASE_URL|UPSTASH_REDIS)' .dev.vars | xargs)` then `bun test`.
+> `.dev.vars` is **not** auto-loaded by `bun test`.
+>
+> **Migrations on an existing Neon DB:** the Drizzle migrator requires a
+> `__drizzle_migrations` journal table. If the baseline (`0000`) was applied
+> manually, `db:migrate` fails with `42P07` (duplicate table). Apply new
+> migrations via `drizzle-kit push` or run the new migration's SQL statements
+> directly against the DB instead.
 
 ## Progress protocol
 
@@ -81,10 +96,13 @@ After finishing meaningful work in a phase:
 ## Implementation habits
 
 - Package layout: follow `architecture.md` (`src/...`).
-- Prefer modular replaceable adapters (`OpenAICompatibleProvider`, `Retriever`).
-- Hot path: delta → load memory → deterministic → Memory AI only if needed → compile → upstream → unchanged response.
+- Prefer modular replaceable adapters (`OpenAICompatibleProvider`, `Retriever`, `ShortTermContextStore`).
+- Hot path: delta → extract candidates → **Memory Analyzer** (three-way bucket) → store→PostgreSQL / context→Redis / discard→drop → compile (merge long-term + short-term) → upstream → unchanged response.
+- Memory Analyzer modules: `src/memory/analyzer.ts` (classify/derive), `src/memory/context-store.ts` (Redis + in-memory store), `src/memory/retrieve.ts` (deterministic long-term retrieval), `src/context/compiler.ts` (context composer merging both stores).
+- Structured long-term triples live on `memory_items` (`subject`, `predicate`, `value`, `scope`, `valid_from`, `valid_until`); persisted across all insert/update/contradiction paths.
+- Short-term context keys: `current_error` (TTL 3600s), `active_debugging_context` / `current_task` / `recent_decisions` (TTL 7200s).
 - Streaming: proxy SSE immediately; memory after complete / async via `waitUntil`.
-- Tests required for: delta, memory merge/supersede, budget, proxy identity (stream + non-stream).
+- Tests required for: delta, memory merge/supersede, budget, proxy identity (stream + non-stream), analyzer classification, context store (in-memory + live Redis), retrieval, context composition.
 - Do not commit unless the user asks.
 
 ## Decision shortcuts
@@ -107,6 +125,14 @@ After finishing meaningful work in a phase:
 | Local base URL? | `http://localhost:8787/v1` (wrangler dev) |
 | Config secrets? | `wrangler secret put <KEY>` — never in `wrangler.jsonc` or committed files |
 | Database? | Neon via `DATABASE_URL` |
+| Where does a candidate go? | Three-way bucket via `src/memory/analyzer.ts`: `store`→PostgreSQL, `context`→Redis, `discard`→drop |
+| What's a durable fact? | Stable/identity/preference (e.g. "My name is X", "X uses Y", "I prefer Z") → store |
+| What's short-term context? | Transient "right now" state: debugging, current error/issue, current task → Redis w/ TTL |
+| What's discarded? | Noise/filler acknowledgements (haha, ok, thanks, yes...) → dropped entirely |
+| Short-term vs long-term in prompt? | Composer merges both: long-term SPV triples + a `[Short-Term Context]` block |
+| Redis down? | Fail-open → `MemoryContextStore` (in-memory) fallback; never break main forwarding |
+| How to test Redis? | Source `.dev.vars` (`UPSTASH_REDIS_REST_URL`/`TOKEN`) then `bun test tests/redis-context.integration.test.ts` |
+| Upstash hash numeric values? | Returned as numbers (e.g. `401`), not strings — coerce with `String()` in assertions |
 
 ## Extra reference
 

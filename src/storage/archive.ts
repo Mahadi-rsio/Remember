@@ -4,6 +4,7 @@ import { users as usersTable } from "../db/schema/users";
 import { messages as messagesTable, type Message } from "../db/schema/messages";
 import { detectDelta, type DeltaResult } from "../memory/delta";
 import { processMemoryDelta, processMemoryDeltaAsync } from "../memory/engine";
+import type { ShortTermContextStore } from "../memory/context-store";
 import type { NormalizedMessage } from "../memory/ids";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 
@@ -99,7 +100,12 @@ export async function persistNewMessages(
 export async function archiveRequest(
   db: Database,
   body: Record<string, any>,
-  options?: { userId: string; apiKey?: string | null; headers?: Headers | Record<string, string> }
+  options?: {
+    userId: string;
+    apiKey?: string | null;
+    headers?: Headers | Record<string, string>;
+    contextStore?: ShortTermContextStore | null;
+  }
 ): Promise<DeltaResult | null> {
   try {
     const userId = options?.userId || "";
@@ -113,7 +119,7 @@ export async function archiveRequest(
 
     if (delta.newMessages.length > 0) {
       try {
-        await processMemoryDelta(db, delta);
+        await processMemoryDelta(db, delta, { contextStore: options?.contextStore });
       } catch {}
     }
 
@@ -126,7 +132,13 @@ export async function archiveRequest(
 export async function archiveRequestAsync(
   db: Database,
   body: Record<string, any>,
-  options?: { userId: string; apiKey?: string | null; headers?: Headers | Record<string, string>; memoryAi?: MemoryAIAdapter | null }
+  options?: {
+    userId: string;
+    apiKey?: string | null;
+    headers?: Headers | Record<string, string>;
+    memoryAi?: MemoryAIAdapter | null;
+    contextStore?: ShortTermContextStore | null;
+  }
 ): Promise<DeltaResult | null> {
   try {
     const userId = options?.userId || "";
@@ -140,7 +152,10 @@ export async function archiveRequestAsync(
 
     if (delta.newMessages.length > 0) {
       try {
-        await processMemoryDeltaAsync(db, delta, { memoryAi: options?.memoryAi });
+        await processMemoryDeltaAsync(db, delta, {
+          memoryAi: options?.memoryAi,
+          contextStore: options?.contextStore,
+        });
       } catch {}
     }
 

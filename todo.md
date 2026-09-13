@@ -186,6 +186,43 @@ Track work against `plan.md`. Check items as they land.
 
 ---
 
+## Phase 10 — Short-Term + Long-Term Memory Architecture
+
+> **Goal:** Refactor the Memory Gateway into an advanced short-term (Redis) + long-term (PostgreSQL) memory system. Memory Analyzer performs three-way classification (`store`/`context`/`discard`); long-term memories become structured subject/predicate/value triples in PostgreSQL; short-term context lives in Redis with TTL; Context Composer merges both. No embeddings/vector search yet.
+
+### 10.1 Analyzer (Three-Way Classification)
+- [x] `MemoryBucket` enum (`STORE`/`CONTEXT`/`DISCARD`) (`src/models/memory.ts`)
+- [x] `ContextEntry` interface + extended `CandidateMemory` (bucket, subject, predicate, value, scope, validFrom, validUntil) (`src/models/memory.ts`)
+- [x] `classifyCandidate` / `deriveContextKey` / `deriveStructuredFields` / `analyzeCandidates` (`src/memory/analyzer.ts`)
+- [x] Noise/filler discard + context markers (debugging, current error, current task)
+
+### 10.2 Short-Term Store (Redis + in-memory fallback)
+- [x] `ShortTermContextStore` interface + `MemoryContextStore` + `RedisContextStore` + `createContextStore*` (`src/memory/context-store.ts`)
+- [x] TTL semantics (`current_error`=3600s, else 7200s)
+- [x] Live Upstash credentials added to `.dev.vars` (URL + token)
+- [x] Live Redis integration tests pass against real Upstash (`tests/redis-context.integration.test.ts`)
+
+### 10.3 Long-Term Retrieval
+- [x] `retrieveMemories` / `retrieveActiveMemories` deterministic filters (`src/memory/retrieve.ts`)
+
+### 10.4 Persistence & Wiring
+- [x] `memory_items` new columns: subject, predicate, value, scope, valid_from, valid_until + indexes (`src/db/schema/memory.ts`, `drizzle/0001_curved_sersi.sql`)
+- [x] Structured columns persisted in all insert/update/contradiction paths (`src/memory/contradiction.ts`)
+- [x] Engine routes candidates via analyzer; fail-open on context writes (`src/memory/engine.ts`)
+- [x] Archive + routes pass `contextStore` (`src/storage/archive.ts`, `src/routes/v1.ts`)
+- [x] Redis context store built from `getRedis(c.env)` (`src/routes/v1.ts`)
+
+### 10.5 Context Composer (merge both)
+- [x] `compileContext` accepts `contextStore`, pulls short-term context, injects `[Short-Term Context]` block, tracks `shortTermItemsUsed` (`src/context/compiler.ts`)
+
+### 10.6 Tests
+- [x] Analyzer unit tests (`tests/analyzer.test.ts`)
+- [x] Context store unit tests (memory + Redis adapters) (`tests/context-store.test.ts`)
+- [x] Full integration: single memory, multiple memories, temporary context, discarded noise, duplicate, update, contradiction, historical state, user/project scope, Redis TTL/context, retrieval, context composition (`tests/short-term-long-term.integration.test.ts`)
+- [x] Full suite green: 92 pass / 0 fail (incl. live Redis)
+
+---
+
 ## Explicit Non-Goals
 
 - [ ] ~~Docker / server deployment~~ (Cloudflare Workers only)

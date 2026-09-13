@@ -2,8 +2,10 @@ import type { Database } from "../db";
 import type { DeltaResult } from "./delta";
 import type { ApplyResult } from "./contradiction";
 import type { CandidateMemory, MemoryAIOutput } from "../models/memory";
+import type { ShortTermContextStore } from "./context-store";
 import { extractCandidates } from "./extractor";
 import { isLowInfoMessage } from "./low-info";
+import { analyzeCandidates } from "./analyzer";
 import { memoryAiOutputToCandidates } from "./compressor";
 import {
   listMemoryItems,
@@ -19,6 +21,9 @@ export interface MemoryUpdateResult {
   userId: string;
   skippedLowInfo?: boolean;
   candidates: number;
+  stored: number;
+  contextCount: number;
+  discarded: number;
   applied: ApplyResult[];
   obsoleteMarked: number;
   contextVersion?: number | null;
@@ -28,15 +33,23 @@ export interface MemoryUpdateResult {
 export async function processMemoryDelta(
   db: Database,
   delta: DeltaResult,
-  options?: { memoryAiOutput?: MemoryAIOutput | null }
+  options?: {
+    memoryAiOutput?: MemoryAIOutput | null;
+    contextStore?: ShortTermContextStore | null;
+  }
 ): Promise<MemoryUpdateResult | null> {
+  const base = {
+    userId: delta.userId,
+    candidates: 0,
+    stored: 0,
+    contextCount: 0,
+    discarded: 0,
+    applied: [],
+    obsoleteMarked: 0,
+  };
+
   if (!delta.newMessages || delta.newMessages.length === 0) {
-    return {
-      userId: delta.userId,
-      candidates: 0,
-      applied: [],
-      obsoleteMarked: 0,
-    };
+    return { ...base };
   }
 
   const meaningful = delta.newMessages.filter(
@@ -45,11 +58,8 @@ export async function processMemoryDelta(
 
   if (meaningful.length === 0) {
     return {
-      userId: delta.userId,
+      ...base,
       skippedLowInfo: true,
-      candidates: 0,
-      applied: [],
-      obsoleteMarked: 0,
     };
   }
 
@@ -69,9 +79,31 @@ export async function processMemoryDelta(
       }
     }
 
+    // Memory Analyzer: route each candidate to store / context / discard.
+    const { store, discard, contextEntries } = analyzeCandidates(candidates);
+
     let results: ApplyResult[] = [];
-    if (candidates.length > 0) {
-      results = await persistCandidates(db, delta.userId, candidates);
+    if (store.length > 0) {
+      results = await persistCandidates(db, delta.userId, store);
+    }
+
+    // Persist short-term context (Redis / in-memory store).
+    let contextCount = 0;
+    const contextStore = options?.contextStore;
+    if (contextStore && contextEntries.length > 0) {
+      for (const entry of contextEntries) {
+        try {
+          await contextStore.setContext(
+            delta.userId,
+            entry.key,
+            entry.value,
+            entry.ttlSeconds
+          );
+          contextCount++;
+        } catch {
+          // fail-open: context persistence must never break the main path
+        }
+      }
     }
 
     let obsoleteCount = 0;
@@ -92,6 +124,9 @@ export async function processMemoryDelta(
     return {
       userId: delta.userId,
       candidates: candidates.length,
+      stored: store.length,
+      contextCount,
+      discarded: discard.length,
       applied: results,
       obsoleteMarked: obsoleteCount,
       contextVersion: versionNum,
@@ -100,6 +135,9 @@ export async function processMemoryDelta(
     return {
       userId: delta.userId,
       candidates: 0,
+      stored: 0,
+      contextCount: 0,
+      discarded: 0,
       applied: [],
       obsoleteMarked: 0,
       error: err?.message || String(err),
@@ -110,15 +148,23 @@ export async function processMemoryDelta(
 export async function processMemoryDeltaAsync(
   db: Database,
   delta: DeltaResult,
-  options?: { memoryAi?: MemoryAIAdapter | null }
+  options?: {
+    memoryAi?: MemoryAIAdapter | null;
+    contextStore?: ShortTermContextStore | null;
+  }
 ): Promise<MemoryUpdateResult | null> {
+  const base = {
+    userId: delta.userId,
+    candidates: 0,
+    stored: 0,
+    contextCount: 0,
+    discarded: 0,
+    applied: [],
+    obsoleteMarked: 0,
+  };
+
   if (!delta.newMessages || delta.newMessages.length === 0) {
-    return {
-      userId: delta.userId,
-      candidates: 0,
-      applied: [],
-      obsoleteMarked: 0,
-    };
+    return { ...base };
   }
 
   const meaningful = delta.newMessages.filter(
@@ -127,11 +173,8 @@ export async function processMemoryDeltaAsync(
 
   if (meaningful.length === 0) {
     return {
-      userId: delta.userId,
+      ...base,
       skippedLowInfo: true,
-      candidates: 0,
-      applied: [],
-      obsoleteMarked: 0,
     };
   }
 
@@ -159,5 +202,8 @@ export async function processMemoryDeltaAsync(
     }
   }
 
-  return await processMemoryDelta(db, delta, { memoryAiOutput: aiOutput });
+  return await processMemoryDelta(db, delta, {
+    memoryAiOutput: aiOutput,
+    contextStore: options?.contextStore,
+  });
 }

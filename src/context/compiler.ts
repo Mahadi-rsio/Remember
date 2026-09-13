@@ -15,6 +15,8 @@ import {
   listMemoryItems,
   resolveActiveConflicts,
 } from "../memory/state";
+import { retrieveActiveMemories } from "../memory/retrieve";
+import type { ShortTermContextStore } from "../memory/context-store";
 import { MemoryStatus } from "../models/memory";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 import { contextVersions } from "../db/schema/context";
@@ -24,6 +26,7 @@ export interface CompileResult {
   totalTokens: number;
   contextVersion?: number | null;
   canonicalItemsUsed: number;
+  shortTermItemsUsed: number;
   selectedCount: number;
   budget: number;
 }
@@ -68,6 +71,7 @@ export async function compileContext(
     budget?: number;
     memoryAi?: MemoryAIAdapter | null;
     persistSnapshot?: boolean;
+    contextStore?: ShortTermContextStore | null;
   }
 ): Promise<CompileResult> {
   const targetBudget = options?.budget || 8000;
@@ -78,6 +82,7 @@ export async function compileContext(
       totalTokens: 0,
       budget: targetBudget,
       canonicalItemsUsed: 0,
+      shortTermItemsUsed: 0,
       selectedCount: 0,
     };
   }
@@ -97,6 +102,21 @@ export async function compileContext(
       try {
         const rawItems = await listMemoryItems(db, userId, MemoryStatus.ACTIVE);
         canonicalItems = resolveActiveConflicts(rawItems);
+      } catch {}
+    }
+
+    // Short-term context from Redis (or in-memory store) — "what's happening right now?"
+    let shortTermText = "";
+    let shortTermItemsUsed = 0;
+    const contextStore = options?.contextStore;
+    if (contextStore && userId) {
+      try {
+        const ctx = await contextStore.getAllContext(userId);
+        if (ctx && ctx.length > 0) {
+          const lines = ctx.map((e) => `• ${e.key}: ${e.value}`);
+          shortTermText = `[Short-Term Context (current state)]\n${lines.join("\n")}`;
+          shortTermItemsUsed = ctx.length;
+        }
       } catch {}
     }
 
@@ -146,8 +166,17 @@ export async function compileContext(
       candidates.push(item);
     }
 
+    // Deterministic retrieval: use structured retrieval when possible, else the
+    // already-loaded canonical items (which are the active long-term set).
+    let retrievedActive: any[] = canonicalItems;
+    if (db && userId && canonicalItems.length === 0) {
+      try {
+        retrievedActive = await retrieveActiveMemories(db, userId, { limit: 20 });
+      } catch {}
+    }
+
     const currentTokens = estimateMessagesTokens(messages);
-    if (canonicalItems.length === 0 && currentTokens <= targetBudget) {
+    if (retrievedActive.length === 0 && shortTermItemsUsed === 0 && currentTokens <= targetBudget) {
       let versionNum: number | null = null;
       if (db && userId && options?.persistSnapshot !== false) {
         versionNum = await persistContextSnapshot(db, userId, messages, {
@@ -162,15 +191,27 @@ export async function compileContext(
         totalTokens: currentTokens,
         contextVersion: versionNum,
         canonicalItemsUsed: 0,
+        shortTermItemsUsed: 0,
         selectedCount: messages.length,
         budget: targetBudget,
       };
     }
 
     const selected = selectItemsForBudget(candidates, targetBudget);
-    const compiledMessages = assembleContextMessages(selected, {
-      hasCanonicalMemory: canonicalItems.length > 0,
+
+    // Prepend the short-term context block to the assembled system prompt.
+    let compiledMessages = assembleContextMessages(selected, {
+      hasCanonicalMemory: retrievedActive.length > 0,
     });
+    if (shortTermText) {
+      const sysIdx = compiledMessages.findIndex((m) => m.role === "system");
+      if (sysIdx !== -1) {
+        const existing = String(compiledMessages[sysIdx].content || "");
+        compiledMessages[sysIdx].content = `${existing}\n\n${shortTermText}`.trim();
+      } else {
+        compiledMessages.unshift({ role: "system", content: shortTermText });
+      }
+    }
 
     const finalTokens = estimateMessagesTokens(compiledMessages);
     const canonicalUsed = selected.filter((s) => s.kind === "canonical_memory").length;
@@ -191,6 +232,7 @@ export async function compileContext(
       totalTokens: finalTokens,
       contextVersion: versionNum,
       canonicalItemsUsed: canonicalUsed,
+      shortTermItemsUsed,
       selectedCount: selected.length,
       budget: targetBudget,
     };
@@ -200,6 +242,7 @@ export async function compileContext(
       totalTokens: estimateMessagesTokens(messages),
       budget: targetBudget,
       canonicalItemsUsed: 0,
+      shortTermItemsUsed: 0,
       selectedCount: messages.length,
     };
   }

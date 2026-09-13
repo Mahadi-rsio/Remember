@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { HonoContext } from "../env";
 import { getDb } from "../db";
+import { getRedis } from "../cache";
+import { createContextStoreFromRedis } from "../memory/context-store";
 import { OpenAICompatibleProvider, UpstreamError } from "../providers/openai-compatible";
 import { createMemoryAIAdapter } from "../providers/memory-ai";
 import { archiveRequestAsync } from "../storage/archive";
@@ -72,6 +74,7 @@ async function prepareUpstreamBody(
     const compiled = await compileContext(db, messages, userId, {
       budget: budgetVal,
       memoryAi,
+      contextStore: createContextStoreFromRedis(getRedis(c.env)),
       persistSnapshot: true,
     });
 
@@ -136,6 +139,7 @@ v1Router.post("/chat/completions", async (c) => {
       userId: auth.userId,
       apiKey: auth.apiKey,
       memoryAi,
+      contextStore: createContextStoreFromRedis(getRedis(c.env)),
     }).catch(() => {});
     if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
       c.executionCtx.waitUntil(archiveTask);
@@ -204,6 +208,7 @@ v1Router.post("/responses", async (c) => {
       userId: auth.userId,
       apiKey: auth.apiKey,
       memoryAi,
+      contextStore: createContextStoreFromRedis(getRedis(c.env)),
     }).catch(() => {});
     if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
       c.executionCtx.waitUntil(archiveTask);

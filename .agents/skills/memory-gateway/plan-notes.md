@@ -32,5 +32,8 @@ Memory correctness ≥ 95%, correction accuracy ≥ 95%, false-memory rate ≈ 0
 ## Phase 9
 Full TypeScript test suite passes with `bun test`. Covers proxy identity, delta, memory engine, correction/revocation, context compiler, isolation, fail-open.
 
+## Phase 10
+Three-way analyzer (`store`/`context`/`discard`); long-term SPV triples persisted in PostgreSQL; short-term context in Redis w/ TTL (in-memory fallback); context composer merges both; deterministic retrieval; live Redis integration tests pass; full suite green.
+
 ## Hard non-goals
 Require Redis/vector DB; RAG-as-primary; rewrite responses; replace main model; require MCP/custom SDKs; Docker; Python.
