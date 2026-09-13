@@ -29,23 +29,6 @@ export interface CompileResult {
   budget: number;
 }
 
-/**
- * Scope-first retrieval hint: infer whether the query is about the user
- * (name/preferences) or the project/technical stack. Returns undefined when
- * ambiguous so retrieval is not over-narrowed.
- */
-function extractProjectScope(text: string): string | undefined {
-  if (!text) return undefined;
-  const lower = text.toLowerCase();
-  if (/\b(my|my name|i (prefer|like|use|want)|do i|am i)\b/.test(lower)) {
-    return "user";
-  }
-  if (/\b(project|app|stack|database|server|runtime|hosting|architecture|deploy)\b/.test(lower)) {
-    return "project";
-  }
-  return undefined;
-}
-
 async function persistContextSnapshot(
   db: Database,
   userId: string,
@@ -116,13 +99,13 @@ export async function compileContext(
     let retrievedActive: any[] = [];
     if (db && userId) {
       try {
-        // Scope-first retrieval: pull the active long-term set, optionally
-        // narrowed by scope and boosted by the query keywords, then expand
-        // first-class relationships (supersedes/contradicts/related) so we
-        // surface connected history without loading the whole dataset.
-        const scope = extractProjectScope(latestUserText);
+        // Lexical retrieval: pull the active long-term set narrowed by the
+        // query keywords (OR match against content/value/predicate/subject),
+        // then expand first-class relationships (supersedes/contradicts/
+        // related) so we surface connected history without loading the whole
+        // dataset. We deliberately do NOT hard-filter by scope: AI-extracted
+        // scopes are unreliable, so a hard scope filter causes false negatives.
         retrievedActive = await retrieveActiveMemories(db, userId, {
-          scope,
           keywords: queryKeywords.size > 0 ? [...queryKeywords].slice(0, 6) : undefined,
           limit: 40,
         });

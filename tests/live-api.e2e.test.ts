@@ -7,8 +7,11 @@ import { createContextStoreFromRedis } from "../src/memory/context-store";
 import type { ShortTermContextStore } from "../src/memory/context-store";
 import { archiveRequest } from "../src/storage/archive";
 import { listMemoryItems } from "../src/memory/state";
+import { expandRelations } from "../src/memory/retrieve";
 import { compileContext } from "../src/context/compiler";
 import { MemoryStatus } from "../src/models/memory";
+import { memoryItems } from "../src/db/schema/memory";
+import { eq } from "drizzle-orm";
 
 const LIVE_MODEL = process.env.LIVE_MODEL || "deepseek-v4-flash-0731";
 const uid = `live-e2e-${Date.now()}`;
@@ -137,6 +140,42 @@ describe("Live API E2E (real upstream, real Neon, real Redis)", () => {
     const data = (await res.json()) as any;
     const answer = data.choices[0].message.content.toLowerCase();
     expect(answer).toContain("mahadi");
+    await ctx.clearUser(uid);
+  });
+
+  it("records a supersede relationship link through the live flow and expands it", async () => {
+    const db = await createTestDb();
+    const ctx: ShortTermContextStore = createContextStoreFromRedis(getRedis(liveEnv() as any));
+
+    await archiveRequest(
+      db,
+      { messages: [{ role: "user", content: "Remember uses Neon for its database." }] },
+      { userId: uid, contextStore: ctx }
+    );
+    await archiveRequest(
+      db,
+      { messages: [{ role: "user", content: "We switched Remember to Turso for the database." }] },
+      { userId: uid, contextStore: ctx }
+    );
+
+    const activeItems = await listMemoryItems(db, uid, MemoryStatus.ACTIVE);
+    const turso = activeItems.find((i) => i.content.toLowerCase().includes("turso"));
+    expect(turso).toBeDefined();
+
+    // The replacement must carry first-class relationship metadata (CAS-versioned).
+    const [replacement] = await db
+      .select()
+      .from(memoryItems)
+      .where(eq(memoryItems.id, turso!.id));
+    expect(replacement.relationship).toBe("supersedes");
+    expect(replacement.supersedesId).toBeTruthy();
+
+    // Relationship expansion pulls in the superseded Neon fact from live data.
+    const expanded = await expandRelations(db, uid, [turso!], { activeOnly: false });
+    const neon = expanded.find((i) => i.content.toLowerCase().includes("neon"));
+    expect(neon).toBeDefined();
+    expect(neon?.status).toBe(MemoryStatus.SUPERSEDED);
+
     await ctx.clearUser(uid);
   });
 });
