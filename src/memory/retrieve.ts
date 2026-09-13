@@ -6,10 +6,11 @@
  * current-vs-historical state. When embeddings are added later they become an
  * ADDITIONAL retrieval strategy layered on top — not a rewrite of this engine.
  */
-import { and, eq, gte, lte, desc, or, like } from "drizzle-orm";
+import { and, eq, gte, lte, desc, or, like, inArray } from "drizzle-orm";
 import type { Database } from "../db";
 import { memoryItems, type MemoryItem } from "../db/schema/memory";
 import { MemoryStatus } from "../models/memory";
+import { parseIdList } from "./contradiction";
 
 export interface MemoryRetrievalQuery {
   userId: string;
@@ -25,6 +26,8 @@ export interface MemoryRetrievalQuery {
   includeHistorical?: boolean;
   /** Keyword substring match against content / value. */
   keyword?: string;
+  /** Multiple keywords matched as OR (any keyword in content/value/predicate). */
+  keywords?: string[];
   minConfidence?: number;
   minImportance?: number;
   minStability?: number;
@@ -97,6 +100,27 @@ export async function retrieveMemories(
     );
   }
 
+  if (query.keywords && query.keywords.length > 0) {
+    const terms = query.keywords
+      .map((k) => k.trim())
+      .filter((k) => k.length > 1);
+    if (terms.length > 0) {
+      conditions.push(
+        or(
+          ...terms.map((t) => {
+            const p = `%${t}%`;
+            return or(
+              like(memoryItems.content, p),
+              like(memoryItems.value, p),
+              like(memoryItems.predicate, p),
+              like(memoryItems.subject, p)
+            ) as any;
+          })
+        ) as any
+      );
+    }
+  }
+
   if (query.recencySeconds !== undefined && query.recencySeconds > 0) {
     const cutoff = new Date(Date.now() - query.recencySeconds * 1000).toISOString();
     conditions.push(gte(memoryItems.updatedAt, cutoff));
@@ -135,6 +159,7 @@ export async function retrieveActiveMemories(
     predicate?: string;
     scope?: string;
     keyword?: string;
+    keywords?: string[];
     minImportance?: number;
     limit?: number;
   }
@@ -145,9 +170,102 @@ export async function retrieveActiveMemories(
     predicate: options?.predicate,
     scope: options?.scope,
     keyword: options?.keyword,
+    keywords: options?.keywords,
     minImportance: options?.minImportance,
     limit: options?.limit,
     status: MemoryStatus.ACTIVE,
   });
   return result.map((r) => r.item);
+}
+
+/**
+ * Relationship expansion — the 4th stage of the retrieval pipeline.
+ *
+ * Given a set of seed memories (from scope filtering + structured/lexical
+ * retrieval + scoring), follow first-class relationship links (`supersedesId`,
+ * `contradictsIdsJson`, `relatedMemoryIdsJson`) to pull in connected items that
+ * provide relevant context (e.g. the fact a memory superseded, or the memory a
+ * candidate was derived from). This avoids re-loading the whole dataset while
+ * still surfacing strongly-related history.
+ */
+export async function expandRelations(
+  db: Database,
+  userId: string,
+  seeds: MemoryItem[],
+  options?: {
+    /** Max relationship hops to follow (default 1). */
+    depth?: number;
+    /** Only return currently-active related items (default true). */
+    activeOnly?: boolean;
+    limit?: number;
+  }
+): Promise<MemoryItem[]> {
+  if (!seeds || seeds.length === 0) {
+    return [];
+  }
+
+  const seen = new Map<number, MemoryItem>();
+  for (const s of seeds) {
+    seen.set(s.id, s);
+  }
+
+  const frontier = [...seeds];
+  const depth = options?.depth ?? 1;
+
+  for (let hop = 0; hop < depth && frontier.length > 0; hop++) {
+    const linkedIds = new Set<number>();
+    const targets: number[] = [];
+
+    for (const item of frontier) {
+      if (item.supersedesId != null) {
+        targets.push(item.supersedesId);
+        linkedIds.add(item.supersedesId);
+      }
+      for (const id of parseIdList(item.contradictsIdsJson)) {
+        targets.push(id);
+        linkedIds.add(id);
+      }
+      for (const id of parseIdList(item.relatedMemoryIdsJson)) {
+        targets.push(id);
+        linkedIds.add(id);
+      }
+    }
+
+    if (targets.length === 0) {
+      break;
+    }
+
+    const next: MemoryItem[] = [];
+    // Load by batches of ids, excluding ones we already have.
+    for (let i = 0; i < targets.length; i += 500) {
+      const batch = targets.slice(i, i + 500).filter((id) => !seen.has(id));
+      if (batch.length === 0) {
+        continue;
+      }
+      const rows = await db
+        .select()
+        .from(memoryItems)
+        .where(
+          and(
+            eq(memoryItems.userId, userId),
+            inArray(memoryItems.id, batch),
+            options?.activeOnly === false
+              ? undefined
+              : eq(memoryItems.status, MemoryStatus.ACTIVE)
+          )
+        );
+      for (const r of rows) {
+        if (!seen.has(r.id)) {
+          seen.set(r.id, r);
+          next.push(r);
+        }
+      }
+    }
+
+    frontier.length = 0;
+    frontier.push(...next);
+  }
+
+  const out = Array.from(seen.values()).filter((i) => !seeds.some((s) => s.id === i.id));
+  return out.slice(0, options?.limit ?? out.length);
 }

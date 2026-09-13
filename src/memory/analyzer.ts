@@ -153,7 +153,10 @@ export function classifyCandidate(candidate: CandidateMemory): MemoryBucket {
   }
 
   // Active task / active task type → temporary context by default.
-  if (candidate.type === MemoryType.ACTIVE_TASK) {
+  if (
+    candidate.type === MemoryType.ACTIVE_TASK ||
+    candidate.type === MemoryType.TEMPORARY_STATE
+  ) {
     return MemoryBucket.CONTEXT;
   }
 

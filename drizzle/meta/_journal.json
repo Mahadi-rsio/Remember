@@ -15,6 +15,13 @@
       "when": 1789293060293,
       "tag": "0001_curved_sersi",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789296786934,
+      "tag": "0002_faithful_beyonder",
+      "breakpoints": true
     }
   ]
 }

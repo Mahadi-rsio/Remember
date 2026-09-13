@@ -4,13 +4,15 @@ import { memoryItems, type MemoryItem } from "../db/schema/memory";
 import {
   type CandidateMemory,
   type Correction,
+  MemoryRelationship,
   MemoryStatus,
   MemoryType,
 } from "../models/memory";
 import { contentSimilarity, shouldWriteNewItem, scoreCandidate } from "./scorer";
 import { topicKeyFromContent } from "./extractor";
+import { updateItemAtomic } from "./concurrency";
 
-export type ActionKind = "skip" | "merge" | "create" | "supersede" | "reject" | "revoke";
+export type ActionKind = "skip" | "merge" | "create" | "supersede" | "reject" | "revoke" | "conflict";
 
 export interface ApplyResult {
   action: ActionKind;
@@ -19,6 +21,8 @@ export interface ApplyResult {
   reason: string;
   correction?: Correction | null;
   revoked?: MemoryItem[] | null;
+  /** Id of an item whose concurrent modification blocked the write (CAS failed). */
+  conflictItemId?: number | null;
 }
 
 export function parseSourceIds(raw: string): string[] {
@@ -41,6 +45,22 @@ export function dumpSourceIds(ids: string[]): string {
     }
   }
   return JSON.stringify(ordered);
+}
+
+/** Parse a JSON id-list column into a unique array of numbers. */
+export function parseIdList(raw: string | null | undefined): number[] {
+  try {
+    const data = JSON.parse(raw || "[]");
+    if (Array.isArray(data)) {
+      return [...new Set(data.map((x) => Number(x)).filter((n) => Number.isFinite(n)))];
+    }
+  } catch {}
+  return [];
+}
+
+/** Serialize a unique array of numbers into a JSON id-list column. */
+export function dumpIdList(ids: number[]): string {
+  return JSON.stringify([...new Set(ids.filter((n) => Number.isFinite(n)))]);
 }
 
 export async function loadActiveItems(db: Database, userId: string): Promise<MemoryItem[]> {
@@ -140,6 +160,11 @@ export function mergeIntoExisting(item: MemoryItem, candidate: CandidateMemory):
   if (candidate.predicate) item.predicate = candidate.predicate;
   if (candidate.value) item.value = candidate.value;
   if (candidate.scope) item.scope = candidate.scope;
+  if (candidate.relatedToId) {
+    const rel = parseIdList(item.relatedMemoryIdsJson);
+    rel.push(candidate.relatedToId);
+    item.relatedMemoryIdsJson = dumpIdList(rel);
+  }
   item.updatedAt = new Date().toISOString();
   return item;
 }
@@ -197,10 +222,17 @@ export async function applyCandidate(
       const nowIso = new Date().toISOString();
       for (const item of targets) {
         if (item.status === MemoryStatus.ACTIVE) {
-          await db
-            .update(memoryItems)
-            .set({ status: MemoryStatus.REVOKED, updatedAt: nowIso })
-            .where(eq(memoryItems.id, item.id));
+          const ok = await updateItemAtomic(db, item.id, item.version, {
+            status: MemoryStatus.REVOKED,
+            updatedAt: nowIso,
+          });
+          if (!ok) {
+            return {
+              action: "conflict",
+              reason: "revoke_conflict",
+              conflictItemId: item.id,
+            };
+          }
           item.status = MemoryStatus.REVOKED;
           item.updatedAt = nowIso;
           revoked.push(item);
@@ -220,10 +252,17 @@ export async function applyCandidate(
     const target = correctionOldMatch(candidate, active);
     if (target && canSupersede(candidate, target)) {
       const nowIso = new Date().toISOString();
-      await db
-        .update(memoryItems)
-        .set({ status: MemoryStatus.SUPERSEDED, updatedAt: nowIso })
-        .where(eq(memoryItems.id, target.id));
+      const ok = await updateItemAtomic(db, target.id, target.version, {
+        status: MemoryStatus.SUPERSEDED,
+        updatedAt: nowIso,
+      });
+      if (!ok) {
+        return {
+          action: "conflict",
+          reason: "supersede_conflict",
+          conflictItemId: target.id,
+        };
+      }
       target.status = MemoryStatus.SUPERSEDED;
       target.updatedAt = nowIso;
 
@@ -244,6 +283,10 @@ export async function applyCandidate(
           freshness: candidate.scores.freshness,
           informationGain: candidate.scores.informationGain,
           sourceMessageIdsJson: dumpSourceIds(candidate.sourceMessageIds),
+          supersedesId: target.id,
+          relationship: MemoryRelationship.SUPERSEDES,
+          contradictsIdsJson: dumpIdList([target.id]),
+          relatedMemoryIdsJson: dumpIdList([target.id]),
           status: MemoryStatus.ACTIVE,
           version: target.version + 1,
           validFrom: candidate.validFrom || nowIso,
@@ -267,22 +310,27 @@ export async function applyCandidate(
   for (const item of active) {
     if (isNearDuplicate(candidate, item)) {
       mergeIntoExisting(item, candidate);
-      await db
-        .update(memoryItems)
-        .set({
-          sourceMessageIdsJson: item.sourceMessageIdsJson,
-          subject: item.subject,
-          predicate: item.predicate,
-          value: item.value,
-          scope: item.scope,
-          confidence: item.confidence,
-          importance: item.importance,
-          stability: item.stability,
-          freshness: item.freshness,
-          informationGain: item.informationGain,
-          updatedAt: item.updatedAt,
-        })
-        .where(eq(memoryItems.id, item.id));
+      const ok = await updateItemAtomic(db, item.id, item.version, {
+        sourceMessageIdsJson: item.sourceMessageIdsJson,
+        subject: item.subject,
+        predicate: item.predicate,
+        value: item.value,
+        scope: item.scope,
+        confidence: item.confidence,
+        importance: item.importance,
+        stability: item.stability,
+        freshness: item.freshness,
+        informationGain: item.informationGain,
+        relatedMemoryIdsJson: item.relatedMemoryIdsJson,
+        updatedAt: item.updatedAt,
+      });
+      if (!ok) {
+        return {
+          action: "conflict",
+          reason: "merge_conflict",
+          conflictItemId: item.id,
+        };
+      }
       return { action: "merge", item, reason: "near_duplicate" };
     }
   }
@@ -298,10 +346,17 @@ export async function applyCandidate(
         };
       }
       const nowIso = new Date().toISOString();
-      await db
-        .update(memoryItems)
-        .set({ status: MemoryStatus.SUPERSEDED, updatedAt: nowIso })
-        .where(eq(memoryItems.id, item.id));
+      const ok = await updateItemAtomic(db, item.id, item.version, {
+        status: MemoryStatus.SUPERSEDED,
+        updatedAt: nowIso,
+      });
+      if (!ok) {
+        return {
+          action: "conflict",
+          reason: "supersede_conflict",
+          conflictItemId: item.id,
+        };
+      }
       item.status = MemoryStatus.SUPERSEDED;
       item.updatedAt = nowIso;
 
@@ -322,6 +377,10 @@ export async function applyCandidate(
           freshness: candidate.scores.freshness,
           informationGain: candidate.scores.informationGain,
           sourceMessageIdsJson: dumpSourceIds(candidate.sourceMessageIds),
+          supersedesId: item.id,
+          relationship: MemoryRelationship.SUPERSEDES,
+          contradictsIdsJson: dumpIdList([item.id]),
+          relatedMemoryIdsJson: dumpIdList([item.id]),
           status: MemoryStatus.ACTIVE,
           version: item.version + 1,
           validFrom: candidate.validFrom || nowIso,

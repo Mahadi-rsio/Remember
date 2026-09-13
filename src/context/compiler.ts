@@ -12,12 +12,10 @@ import { compressToolMessage } from "../memory/compressor";
 import { normalizeMessage } from "../memory/ids";
 import {
   latestContextVersion,
-  listMemoryItems,
   resolveActiveConflicts,
 } from "../memory/state";
-import { retrieveActiveMemories } from "../memory/retrieve";
+import { retrieveActiveMemories, expandRelations } from "../memory/retrieve";
 import type { ShortTermContextStore } from "../memory/context-store";
-import { MemoryStatus } from "../models/memory";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 import { contextVersions } from "../db/schema/context";
 
@@ -29,6 +27,23 @@ export interface CompileResult {
   shortTermItemsUsed: number;
   selectedCount: number;
   budget: number;
+}
+
+/**
+ * Scope-first retrieval hint: infer whether the query is about the user
+ * (name/preferences) or the project/technical stack. Returns undefined when
+ * ambiguous so retrieval is not over-narrowed.
+ */
+function extractProjectScope(text: string): string | undefined {
+  if (!text) return undefined;
+  const lower = text.toLowerCase();
+  if (/\b(my|my name|i (prefer|like|use|want)|do i|am i)\b/.test(lower)) {
+    return "user";
+  }
+  if (/\b(project|app|stack|database|server|runtime|hosting|architecture|deploy)\b/.test(lower)) {
+    return "project";
+  }
+  return undefined;
 }
 
 async function persistContextSnapshot(
@@ -98,10 +113,30 @@ export async function compileContext(
     const queryKeywords = extractKeywords(latestUserText);
 
     let canonicalItems: any[] = [];
+    let retrievedActive: any[] = [];
     if (db && userId) {
       try {
-        const rawItems = await listMemoryItems(db, userId, MemoryStatus.ACTIVE);
-        canonicalItems = resolveActiveConflicts(rawItems);
+        // Scope-first retrieval: pull the active long-term set, optionally
+        // narrowed by scope and boosted by the query keywords, then expand
+        // first-class relationships (supersedes/contradicts/related) so we
+        // surface connected history without loading the whole dataset.
+        const scope = extractProjectScope(latestUserText);
+        retrievedActive = await retrieveActiveMemories(db, userId, {
+          scope,
+          keywords: queryKeywords.size > 0 ? [...queryKeywords].slice(0, 6) : undefined,
+          limit: 40,
+        });
+
+        const expanded = await expandRelations(db, userId, retrievedActive, {
+          depth: 1,
+          activeOnly: true,
+          limit: 20,
+        });
+        const merged = new Map<number, any>();
+        for (const item of [...retrievedActive, ...expanded]) {
+          merged.set(item.id, item);
+        }
+        canonicalItems = resolveActiveConflicts(Array.from(merged.values()));
       } catch {}
     }
 
@@ -166,14 +201,8 @@ export async function compileContext(
       candidates.push(item);
     }
 
-    // Deterministic retrieval: use structured retrieval when possible, else the
-    // already-loaded canonical items (which are the active long-term set).
-    let retrievedActive: any[] = canonicalItems;
-    if (db && userId && canonicalItems.length === 0) {
-      try {
-        retrievedActive = await retrieveActiveMemories(db, userId, { limit: 20 });
-      } catch {}
-    }
+    // Deterministic retrieval happened above (scope-first + relationship
+    // expansion); `retrievedActive` holds the active long-term set.
 
     const currentTokens = estimateMessagesTokens(messages);
     if (retrievedActive.length === 0 && shortTermItemsUsed === 0 && currentTokens <= targetBudget) {

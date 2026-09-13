@@ -18,6 +18,7 @@ export const TYPE_IMPORTANCE: Record<MemoryType, number> = {
   [MemoryType.FACT]: 0.65,
   [MemoryType.IMPORTANT_EVENT]: 0.75,
   [MemoryType.ACTIVE_TASK]: 0.72,
+  [MemoryType.TEMPORARY_STATE]: 0.3,
 };
 
 export function looksSpeculative(text: string): boolean {

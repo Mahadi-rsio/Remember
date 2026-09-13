@@ -85,7 +85,16 @@ export async function persistCandidates(
   let active = await loadActiveItems(db, userId);
 
   for (const candidate of candidates) {
-    const result = await applyCandidate(db, userId, candidate, active);
+    let result = await applyCandidate(db, userId, candidate, active);
+
+    // Optimistic-concurrency conflict: a concurrent request modified the
+    // item between our read and our write. Reload the current active set and
+    // retry once (re-read version → update → merge on fresh state).
+    if (result.action === "conflict") {
+      active = await loadActiveItems(db, userId);
+      result = await applyCandidate(db, userId, candidate, active);
+    }
+
     results.push(result);
 
     if (result.correction && result.action === "supersede" && result.item) {

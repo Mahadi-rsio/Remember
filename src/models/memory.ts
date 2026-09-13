@@ -11,6 +11,7 @@ export enum MemoryType {
   ARCHITECTURE = "architecture",
   IMPORTANT_EVENT = "important_event",
   ACTIVE_TASK = "active_task",
+  TEMPORARY_STATE = "temporary_state",
 }
 
 export const CANONICAL_TYPES: MemoryType[] = Object.values(MemoryType);
@@ -21,6 +22,21 @@ export enum MemoryStatus {
   REVOKED = "revoked",
   EXPIRED = "expired",
   OBSOLETE = "obsolete",
+}
+
+/**
+ * First-class relationship kinds between memory items. Recorded on the
+ * `relationship` column (the relation this item holds toward `supersedesId`)
+ * and in the JSON id-list columns (`contradictsIdsJson`,
+ * `relatedMemoryIdsJson`).
+ */
+export enum MemoryRelationship {
+  SUPPORTS = "supports",
+  CONTRADICTS = "contradicts",
+  SUPERSEDES = "supersedes",
+  DERIVED_FROM = "derived_from",
+  RELATED_TO = "related_to",
+  REVOKES = "revokes",
 }
 
 export interface MemoryScores {
@@ -105,6 +121,10 @@ export interface CandidateMemory {
   structuredFact?: StructuredFact | null;
   correction?: Correction | null;
   revocation?: Revocation | null;
+  /** Relationship this candidate holds toward an existing memory item. */
+  relationship?: MemoryRelationship | null;
+  /** Id of the memory item this candidate is derived from / related to. */
+  relatedToId?: number | null;
 }
 export interface CanonicalMemorySnapshot {
   facts: string[];
@@ -158,6 +178,8 @@ export function snapshotFromItems(items: Array<{ type: string; content: string }
         break;
       case MemoryType.ACTIVE_TASK:
         snapshot.activeTasks.push(item.content);
+        break;
+      case MemoryType.TEMPORARY_STATE:
         break;
     }
   }

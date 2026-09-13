@@ -22,6 +22,12 @@ export const memoryItems = pgTable(
     freshness: real("freshness").notNull().default(0.0),
     informationGain: real("information_gain").notNull().default(0.0),
     sourceMessageIdsJson: text("source_message_ids_json").notNull().default("[]"),
+    /** Relationship links to other memory items (ids serialized as JSON array). */
+    supersedesId: integer("supersedes_id"),
+    contradictsIdsJson: text("contradicts_ids_json").notNull().default("[]"),
+    relatedMemoryIdsJson: text("related_memory_ids_json").notNull().default("[]"),
+    /** The relationship this item has with its `supersedesId` target. */
+    relationship: varchar("relationship", { length: 32 }),
     status: varchar("status", { length: 32 }).notNull().default("active"),
     version: integer("version").notNull().default(1),
     validFrom: timestamp("valid_from", { withTimezone: true, mode: "string" }),
@@ -41,6 +47,7 @@ export const memoryItems = pgTable(
     index("idx_memory_items_subject").on(table.subject),
     index("idx_memory_items_predicate").on(table.predicate),
     index("idx_memory_items_scope").on(table.scope),
+    index("idx_memory_items_supersedes_id").on(table.supersedesId),
   ]
 );
 
