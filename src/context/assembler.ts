@@ -15,7 +15,33 @@ export function formatCanonicalMemoryBlock(items: MemoryItem[]): string {
     if (!grouped[mtype]) {
       grouped[mtype] = [];
     }
-    grouped[mtype].push(item.content);
+    const status = (item.status || "").toLowerCase();
+    const prefix =
+      status === "superseded"
+        ? "(previous) "
+        : status === "revoked"
+          ? "(revoked) "
+          : "";
+
+    let entry = item.content;
+    const pred = (item.predicate || "").trim();
+    const val = (item.value || "").trim();
+    if (pred && val) {
+      // Structured SPV reads clearer than value-only preference content
+      // ("verbose code" → "disliked_verbose_code = verbose code").
+      if (pred.startsWith("disliked_")) {
+        entry = `dislikes ${pred.replace(/^disliked_/, "").replace(/_/g, " ")}: ${val}`;
+      } else if (pred.startsWith("favorite_") || pred.startsWith("preferred_")) {
+        entry = `${pred.replace(/_/g, " ")}: ${val}`;
+      } else if (
+        rawType.toLowerCase() === "preference" ||
+        (item.content || "").trim() === val
+      ) {
+        entry = `${pred.replace(/_/g, " ")}: ${val}`;
+      }
+    }
+
+    grouped[mtype].push(`${prefix}${entry}`);
   }
 
   const lines = ["[Project Memory & Canonical State]"];

@@ -163,7 +163,15 @@ export function findConsolidationClusters(
     const atomics = members.filter(
       (m) => (m.topicKey || "").toLowerCase() !== topic
     );
-    if (atomics.length >= minSize || (atomics.length >= 2 && members.length >= minSize)) {
+    const hasConsolidated = members.some(
+      (m) => (m.topicKey || "").toLowerCase() === topic
+    );
+    // Re-fold leftovers: existing consolidated + ≥1 new atomic is enough.
+    if (
+      atomics.length >= minSize ||
+      (atomics.length >= 2 && members.length >= minSize) ||
+      (hasConsolidated && atomics.length >= 1)
+    ) {
       clusters.push({ topic, items: members });
     }
   }

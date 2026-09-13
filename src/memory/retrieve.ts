@@ -113,7 +113,8 @@ export async function retrieveMemories(
               like(memoryItems.content, p),
               like(memoryItems.value, p),
               like(memoryItems.predicate, p),
-              like(memoryItems.subject, p)
+              like(memoryItems.subject, p),
+              like(memoryItems.topicKey, p)
             ) as any;
           })
         ) as any

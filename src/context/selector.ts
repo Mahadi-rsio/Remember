@@ -249,6 +249,23 @@ export function scoreCanonicalItem(
     relevance = Math.max(relevance, Math.min(1.0, 0.5 + structuredBonus * 0.5));
   }
 
+  // Durable user identity / preferences should survive multi-hop prompts even
+  // when the question nouns don't lexical-match (e.g. "coding style" vs "verbose").
+  const scope = (item.scope || "").toLowerCase();
+  const type = (item.type || "").toLowerCase();
+  const isDurableUser =
+    scope === "user" &&
+    (type === "preference" || type === "fact" || type === "constraint");
+  if (isDurableUser) {
+    relevance = Math.max(relevance, 0.55);
+  }
+
+  // Historical (superseded) items are only injected for contrast questions;
+  // keep them selectable but slightly below active peers.
+  if ((item.status || "").toLowerCase() === "superseded") {
+    relevance = Math.max(0.35, relevance * 0.85);
+  }
+
   return createSelectableItem({
     itemId: `mem-${item.id || options.ordinal}`,
     kind: "canonical_memory",
@@ -256,7 +273,8 @@ export function scoreCanonicalItem(
     tokenCost: tokens,
     memoryItem: item,
     ordinal: options.ordinal,
-    mandatory: false,
+    // Keep a small set of durable user facts always in context.
+    mandatory: isDurableUser && (item.status || "active") === "active",
     relevance,
     confidence: item.confidence || 0.85,
     importance: item.importance || 0.8,

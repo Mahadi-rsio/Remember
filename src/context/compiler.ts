@@ -94,6 +94,9 @@ export async function compileContext(
       }
     }
     const queryKeywords = extractKeywords(latestUserText);
+    // Prefer longer / rarer terms so long questions don't drop "neon"/"database"
+    // when the first 6 tokens are filler verbs.
+    const rankedKeywords = [...queryKeywords].sort((a, b) => b.length - a.length || a.localeCompare(b));
 
     let canonicalItems: any[] = [];
     let retrievedActive: any[] = [];
@@ -105,14 +108,32 @@ export async function compileContext(
         // related) so we surface connected history without loading the whole
         // dataset. We deliberately do NOT hard-filter by scope: AI-extracted
         // scopes are unreliable, so a hard scope filter causes false negatives.
+        const keywordList =
+          rankedKeywords.length > 0 ? rankedKeywords.slice(0, 12) : undefined;
         retrievedActive = await retrieveActiveMemories(db, userId, {
-          keywords: queryKeywords.size > 0 ? [...queryKeywords].slice(0, 6) : undefined,
+          keywords: keywordList,
           limit: 40,
         });
 
+        // Fallback: sparse keyword hits (common on long multi-hop questions)
+        // still need high-importance durable memories in context.
+        if (retrievedActive.length < 4) {
+          const top = await retrieveActiveMemories(db, userId, { limit: 20 });
+          const byId = new Map(retrievedActive.map((i) => [i.id, i]));
+          for (const item of top) {
+            if (!byId.has(item.id)) byId.set(item.id, item);
+          }
+          retrievedActive = Array.from(byId.values());
+        }
+
+        const wantsHistory =
+          /\b(used to|previously|before|old|former|was|were|history|superseded|changed from)\b/i.test(
+            latestUserText
+          );
+
         const expanded = await expandRelations(db, userId, retrievedActive, {
           depth: 1,
-          activeOnly: true,
+          activeOnly: !wantsHistory,
           limit: 20,
         });
         const merged = new Map<number, any>();
@@ -120,6 +141,23 @@ export async function compileContext(
           merged.set(item.id, item);
         }
         canonicalItems = resolveActiveConflicts(Array.from(merged.values()));
+        // When history is requested, keep superseded items that expandRelations
+        // returned so the model can contrast old vs new.
+        if (wantsHistory) {
+          for (const item of expanded) {
+            if (item.status === "superseded" && !merged.has(item.id)) {
+              merged.set(item.id, item);
+            }
+          }
+          // resolveActiveConflicts drops superseded same-topic; re-add historical
+          // siblings explicitly for contrast questions.
+          const historical = expanded.filter((i) => i.status === "superseded");
+          const activeResolved = resolveActiveConflicts(Array.from(merged.values()));
+          const histExtra = historical.filter(
+            (h) => !activeResolved.some((a) => a.id === h.id)
+          );
+          canonicalItems = [...activeResolved, ...histExtra];
+        }
       } catch {}
     }
 
