@@ -59,6 +59,19 @@ export function defaultMemoryScores(): MemoryScores {
 
 export type FactScope = "user" | "project" | "session";
 
+/**
+ * Temporal / modality state of a fact. "usage/current" when omitted for
+ * backwards compatibility with facts that have no explicit state.
+ */
+export type FactState =
+  | "current"
+  | "past"
+  | "planned"
+  | "possible"
+  | "conditional"
+  | "stopped"
+  | "superseded";
+
 /** Three-way classification from the Memory Analyzer. */
 export enum MemoryBucket {
   STORE = "store",
@@ -87,6 +100,12 @@ export interface StructuredFact {
   scope?: FactScope;
   /** True when this fact is an explicit update of a previous value. */
   isUpdate?: boolean;
+  /** Temporal / modality state (current, past, planned, possible, …). */
+  state?: FactState;
+  /** Local extraction confidence 0..1 (undefined → treat as implicit). */
+  confidence?: number;
+  /** Optional metadata: comparison target ("over"), causal reason, etc. */
+  metadata?: Record<string, string>;
 }
 
 export interface Correction {

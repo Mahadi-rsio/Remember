@@ -253,6 +253,22 @@ Track work against `plan.md`. Check items as they land.
 
 ---
 
+## Phase 13 — Hybrid Memory Extraction (Local + Groq) ✅
+
+> **Goal:** Upgrade `memory/facts.ts` into a hybrid extraction system: fast deterministic local rules for obvious facts, Groq LLM fallback (`openai/gpt-oss-20b` via `groq-sdk`) for ambiguous messages, strict JSON-schema validation, and a local semantic safety gate that never trusts Groq blindly. Existing sync API preserved.
+
+- [x] `FactState` type + optional `state`/`confidence`/`metadata` fields on `StructuredFact` (`src/models/memory.ts`)
+- [x] Gate `shouldConsiderMemory` → SKIP / LOCAL / GROQ routing (per-clause, contrast + first-person clause splitting)
+- [x] Local extractors: identity, ownership, usage, past/stopped usage, preference, dislike, favorite, goal, plan, possible plan, decision, conditional, temporary state
+- [x] Groq integration via `groq-sdk` (`GroqExtractor`, `createGroqExtractor`): temperature 0, `reasoning_effort: low`, seed 42, strict `json_schema` response format, injectable `fetchImpl`
+- [x] Local semantic validation of Groq facts (e.g. "I don't like MongoDB" can never become current usage), dedup + merge (`mergeFacts`)
+- [x] Async `extractStructuredFactsHybrid(text, options)` → `{ route, confidence, facts }`; sync `extractStructuredFact(s)` untouched
+- [x] `GROQ_API_KEY` / `GROQ_BASE_URL` / `GROQ_EXTRACTION_MODEL` in `Env` (`.dev.vars`)
+- [x] Regression tests (32 in `tests/facts.test.ts`): gate routing, clause splitting, all local kinds, mocked Groq validation/failure-fallback/merge
+- [x] Live smoke test vs real Groq API (greeting skip, identity→groq, usage/preference→local, past/current split, dislike safety)
+
+---
+
 ## Explicit Non-Goals
 
 - [ ] ~~Docker / server deployment~~ (Cloudflare Workers only)

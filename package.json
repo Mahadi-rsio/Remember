@@ -18,6 +18,7 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.4",
     "drizzle-orm": "^0.45.2",
+    "groq-sdk": "^1.6.0",
     "hono": "^4.13.7",
     "opencode-ai": "^1.18.30",
     "zod": "^3.24.2"

@@ -25,6 +25,11 @@ export interface Env {
   MEMORY_AI_MODEL?: string;
   MEMORY_AI_API_KEY?: string;
 
+  // Groq Memory Extraction
+  GROQ_API_KEY?: string;
+  GROQ_BASE_URL?: string;
+  GROQ_EXTRACTION_MODEL?: string;
+
   // Logging
   LOG_LEVEL?: string;
 }
