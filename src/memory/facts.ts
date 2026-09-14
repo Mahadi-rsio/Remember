@@ -364,7 +364,7 @@ export function extractPreference(text: string): StructuredFact | null {
     rawText: text,
     key: `user.preference.${slugify(attr)}`,
     scope: "user",
-    metadata: other ? { over: other } : undefined,
+    metadata: other ? { preferred_over: other } : undefined,
   };
 }
 
@@ -1460,7 +1460,7 @@ export function extractLocalPreference(text: string): LocalExtractionResult | nu
       scope: "user",
       state: "current",
       confidence: pattern.confidence,
-      metadata: over ? { over } : undefined,
+      metadata: over ? { preferred_over: over } : undefined,
     };
 
     return {
@@ -1882,7 +1882,21 @@ export const GROQ_FACT_SCHEMA = {
         additionalProperties: false as const,
         properties: {
           entity: { type: "string" as const },
-          attribute: { type: "string" as const },
+          attribute: {
+            type: "string" as const,
+            enum: [
+              "name",
+              "occupation",
+              "project",
+              "uses",
+              "database",
+              "preference",
+              "dislike",
+              "experiment",
+              "goal",
+              "plan",
+            ],
+          },
           value: { type: "string" as const },
           type: {
             type: "string" as const,
@@ -1902,11 +1916,10 @@ export const GROQ_FACT_SCHEMA = {
           metadata: {
             type: ["object", "null"] as const,
             additionalProperties: false as const,
-            required: ["over", "condition", "polarity", "reason"],
+            required: ["preferred_over", "condition", "reason"],
             properties: {
-              over: { type: ["string", "null"] as const },
+              preferred_over: { type: ["string", "null"] as const },
               condition: { type: ["string", "null"] as const },
-              polarity: { type: ["string", "null"] as const },
               reason: { type: ["string", "null"] as const },
             },
           },
@@ -1916,7 +1929,21 @@ export const GROQ_FACT_SCHEMA = {
   },
 };
 
-/** Canonical attribute aliases → preferred name. */
+/** Allowed attributes after local normalization — inventing others is rejected. */
+export const CANONICAL_ATTRIBUTES: ReadonlySet<string> = new Set([
+  "name",
+  "occupation",
+  "project",
+  "uses",
+  "database",
+  "preference",
+  "dislike",
+  "experiment",
+  "goal",
+  "plan",
+]);
+
+/** Loose aliases → one of CANONICAL_ATTRIBUTES. Unmapped → reject. */
 export const CANONICAL_ATTRIBUTE_MAP: ReadonlyMap<string, string> = new Map([
   ["name", "name"],
   ["full_name", "name"],
@@ -1926,63 +1953,73 @@ export const CANONICAL_ATTRIBUTE_MAP: ReadonlyMap<string, string> = new Map([
   ["role", "occupation"],
   ["profession", "occupation"],
   ["title", "occupation"],
-  ["age", "age"],
-  ["location", "location"],
-  ["city", "location"],
-  ["country", "location"],
-  ["based_in", "location"],
   ["project", "project"],
   ["project_name", "project"],
+  ["uses", "uses"],
+  ["usage", "uses"],
+  ["technology", "uses"],
+  ["tech", "uses"],
+  ["tool", "uses"],
+  ["stack", "uses"],
+  ["runtime", "uses"],
+  ["hosting", "uses"],
+  ["platform", "uses"],
+  ["framework", "uses"],
+  ["frontend", "uses"],
+  ["frontend_framework", "uses"],
+  ["cache", "uses"],
+  ["caching", "uses"],
+  ["storage", "uses"],
+  ["language", "uses"],
+  ["editor", "uses"],
+  ["decision", "uses"],
   ["database", "database"],
   ["db", "database"],
-  ["cache", "cache"],
-  ["caching", "cache"],
-  ["storage", "storage"],
-  ["runtime", "runtime"],
-  ["hosting", "runtime"],
-  ["platform", "runtime"],
-  ["framework", "framework"],
-  ["frontend", "frontend"],
-  ["frontend_framework", "frontend"],
-  ["ui_library", "ui_library"],
-  ["language", "language"],
-  ["usage", "usage"],
-  ["technology", "usage"],
-  ["tech", "usage"],
-  ["tool", "usage"],
-  ["stack", "usage"],
   ["preference", "preference"],
   ["prefer", "preference"],
-  ["dislike", "preference"],
-  ["avoid", "preference"],
-  ["hate", "preference"],
+  ["favorite", "preference"],
+  ["favourite", "preference"],
+  ["ui_library", "preference"],
+  ["dislike", "dislike"],
+  ["avoid", "dislike"],
+  ["hate", "dislike"],
+  ["experiment", "experiment"],
+  ["temporary", "experiment"],
+  ["temporary_state", "experiment"],
+  ["testing", "experiment"],
   ["goal", "goal"],
   ["objective", "goal"],
   ["plan", "plan"],
-  ["decision", "decision"],
-  ["ownership", "ownership"],
-  ["temporary_state", "temporary_state"],
-  ["temporary", "temporary_state"],
 ]);
 
-/** User-owned attribute kinds — entity must always be "user". */
+/** User-owned attributes — entity must always be "user". */
 const USER_OWNED_ATTRIBUTES: ReadonlySet<string> = new Set([
-  "name", "age", "occupation", "location", "preference", "goal", "plan",
-  "decision", "ownership", "dislike", "favorite_color",
+  "name",
+  "occupation",
+  "preference",
+  "dislike",
+  "goal",
+  "plan",
+  "experiment",
 ]);
 
 const SINGLE_VALUE_ATTRIBUTES: ReadonlySet<string> = new Set([
-  "name", "age", "occupation", "location", "project",
+  "name",
+  "occupation",
+  "project",
 ]);
 
 const TEMPORARY_HINT_RE =
   /\b(?:testing|trying|experimenting|debugging|checking|looking\s+at|learning\s+about|playing\s+with|evaluating)\b/i;
 
 const PROJECT_SCOPE_HINT_RE =
-  /\b(?:for\s+my\s+project|in\s+my\s+project|on\s+my\s+project|my\s+project\s+uses|for\s+the\s+project|in\s+the\s+project)\b/i;
+  /\b(?:for\s+my\s+project|in\s+my\s+project|on\s+my\s+project|my\s+project\s+uses|for\s+the\s+project|in\s+the\s+project|called\s+\w+|for\s+[A-Z][A-Za-z0-9_-]+)\b/i;
 
 const CONDITIONAL_HINT_RE =
-  /\b(?:if|unless|provided\s+that|depending\s+on|only\s+if|when)\b/i;
+  /\b(?:if|unless|provided\s+that|depending\s+on|only\s+if)\b/i;
+
+const PROJECT_NAME_RE =
+  /\b(?:project\s+called|building(?:\s+an?)?(?:\s+\w+)*\s+called|app\s+called|named)\s+([A-Z][A-Za-z0-9_-]+)/i;
 
 /**
  * Create a Groq-based fact extractor.
@@ -2063,47 +2100,40 @@ Never invent facts. If nothing durable is stated, return {"facts":[]}.
 
 ATOMICITY
 - One fact = one piece of information.
-- Split compound statements into separate facts.
-- Example: "I use Cloudflare Workers with D1 and Redis for my project" →
-  three usage facts (Cloudflare Workers, D1, Redis), scope "project" when project context is clear.
-- Prefer specific attributes when known (database, runtime, cache, framework); otherwise use "usage".
+- Split technology lists into separate facts.
+- Example: "Cloudflare Workers with D1 and Redis" → three facts with attribute "uses".
 
 ENTITY RULES
-- Never use the user's personal name as entity.
-- All user-owned facts MUST use entity "user" (name, occupation, preference, goal, plan, dislike, etc.).
-- Project-owned stack/usage facts use entity "project" (or the explicit project name) and scope "project".
-- Pronouns like "it/this/that/the project" → entity "project".
+- Personal facts MUST use entity "user". Never use the user's name as entity.
+- Project facts use the actual project name as entity when known (e.g. "MemoryBox"), else "project".
+- Pronouns like "it/this/that/the project" → the known project name or "project".
 
-CANONICAL ATTRIBUTES
-Use short canonical attributes only, e.g.:
-name, occupation, age, location, project, database, cache, storage, runtime, framework,
-frontend, ui_library, language, usage, preference, goal, plan, decision, ownership, temporary_state.
+CANONICAL ATTRIBUTES (ONLY these — never invent others)
+name | occupation | project | uses | database | preference | dislike | experiment | goal | plan
 
 STATE / TYPE RULES
-- "I use X" → type "usage", state "current"
-- "I used X" / "I used to use X" → type "past_usage", state "past"
-- "I stopped using X" / "I don't use X anymore" → type "stopped_usage", state "stopped"
-- "I plan to use X" → type "plan", state "planned"
-- "I want to use X" → type "goal", state "planned" (NOT current usage)
-- "I might X if Y" → type "plan", state "conditional" or "possible"; put the condition in metadata.condition; do NOT emit a separate unrelated fact for the condition
-- "I decided to use X" → type "decision", state "current"
-- Temporary experimentation ("I'm testing/trying/experimenting with X") → type "temporary", NOT permanent usage
+- "I use X" → type "usage", attribute "uses", state "current"
+- "I used X" → type "past_usage", attribute "uses", state "past"
+- "I stopped using X because Y" → type "stopped_usage", attribute "uses", state "stopped", metadata.reason = Y
+- "I plan to use X" → type "plan", attribute "plan", state "planned"
+- "I want to …" → type "goal", attribute "goal", state "planned"
+- "I might switch to X if Y" → attribute "plan", state "conditional" or "possible"; put Y in metadata.condition; do NOT emit a separate fact for the condition
+- "I am experimenting/testing/trying X" → attribute "experiment" (NOT permanent uses)
+- Explicit database choice may use attribute "database"; otherwise stack items use "uses"
 
-PREFERENCES
-- Preferences are atomic: value is the preferred thing only.
-- "I prefer MUI over shadcn" → attribute "preference" (or ui_library), value "MUI", metadata.over = "shadcn"
-- Never embed comparisons into attribute or value strings.
-- Dislikes/avoidance → one preference fact with metadata.polarity = "negative" (do not emit duplicates for hate/dislike/avoid of the same thing)
+PREFERENCES / DISLIKES
+- "I prefer A over B" → attribute "preference", value A, metadata.preferred_over = B
+- Never embed comparisons into value
+- "I don't like X" / "I avoid X" / "I hate X" → one attribute "dislike" fact (no duplicates)
 
 rawText
-- Set rawText to the smallest relevant sentence or clause that supports the fact.
-- Never copy the entire user message when a smaller clause exists.
+- Smallest relevant sentence or clause only
+- NEVER the entire multi-sentence user message
 
 IGNORE
-- questions, requests, greetings, thanks, jokes, filler, coding tasks, explanations
-- anything not explicitly stated
+- questions, requests, suggestions, greetings, thanks, jokes, filler, coding tasks
 
-metadata fields (use null when unused): over, condition, polarity, reason
+metadata fields (null when unused): preferred_over, condition, reason
 
 Return only the required JSON object.`;
 
@@ -2155,12 +2185,13 @@ Return only the required JSON object.`;
 
         const metadata = normalizeGroqMetadata(item.metadata);
 
+        // Never default rawText to the entire source here — validation picks the clause
         facts.push({
           entity,
           attribute,
           value,
           memoryType: mtype,
-          rawText: itemRaw || sourceText,
+          rawText: itemRaw,
           key: `${scope}.${slugify(attribute)}`,
           scope: scope as "user" | "project" | "session",
           state: fstate,
@@ -2169,7 +2200,6 @@ Return only the required JSON object.`;
         });
       }
 
-      // Full local normalization / validation / dedupe
       return applyLocalSemanticValidation(facts, sourceText);
     } catch {
       return [];
@@ -2223,11 +2253,18 @@ function normalizeGroqMetadata(
 ): Record<string, string> | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const out: Record<string, string> = {};
-  for (const key of ["over", "condition", "polarity", "reason"] as const) {
-    const v = (raw as Record<string, unknown>)[key];
+  const src = raw as Record<string, unknown>;
+  // Accept both preferred_over and legacy "over"
+  for (const [from, to] of [
+    ["preferred_over", "preferred_over"],
+    ["over", "preferred_over"],
+    ["condition", "condition"],
+    ["reason", "reason"],
+  ] as const) {
+    const v = src[from];
     if (v === null || v === undefined) continue;
     const s = String(v).trim();
-    if (s) out[key] = s;
+    if (s) out[to] = s;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -2236,31 +2273,38 @@ function normalizeGroqMetadata(
 // 10. VALIDATION & NORMALIZATION
 // ============================================================
 
-/** Canonicalize an attribute name. */
-export function canonicalizeAttribute(attribute: string): string {
-  const slug = slugify(normalizePreferenceSpelling(attribute));
-  if (!slug) return attribute;
-  if (slug.startsWith("favorite_") || slug.startsWith("preferred_") || slug.startsWith("disliked_")) {
-    return slug;
-  }
-  return CANONICAL_ATTRIBUTE_MAP.get(slug) || slug;
+/**
+ * Map an attribute to a canonical name, or null if it must be rejected.
+ * Never invent new attribute names outside CANONICAL_ATTRIBUTES.
+ */
+export function canonicalizeAttribute(attribute: string): string | null {
+  const raw = normalizePreferenceSpelling(attribute).trim();
+  const slug = slugify(raw);
+  if (!slug) return null;
+
+  // Normalize legacy negative prefixes only
+  if (slug.startsWith("disliked_")) return "dislike";
+
+  const mapped = CANONICAL_ATTRIBUTE_MAP.get(slug);
+  if (mapped && CANONICAL_ATTRIBUTES.has(mapped)) return mapped;
+  if (CANONICAL_ATTRIBUTES.has(slug)) return slug;
+  return null;
 }
 
-/** Stable dedupe identity for a fact (allows multiple usage values). */
+/** Stable dedupe identity for a fact (allows multiple uses values). */
 export function factIdentityKey(fact: StructuredFact): string {
   const scope = fact.scope || scopeForFact(fact);
   const attr = slugify(fact.attribute);
   const state = fact.state || "current";
-  const polarity = fact.metadata?.polarity || "";
   if (SINGLE_VALUE_ATTRIBUTES.has(attr)) {
-    return `${scope}|${attr}|${state}`;
+    return `${scope}|${attr}`;
   }
-  return `${scope}|${attr}|${slugify(fact.value)}|${state}|${polarity}`;
+  return `${scope}|${attr}|${slugify(fact.value)}|${state}`;
 }
 
 /**
- * Pick the smallest clause/sentence from source that mentions the value
- * (or fall back to a short provided rawText / the source itself).
+ * Pick the smallest clause/sentence from source that mentions the value.
+ * Never returns the entire multi-sentence message when a smaller clause exists.
  */
 export function findSmallestRawText(
   sourceText: string,
@@ -2268,18 +2312,24 @@ export function findSmallestRawText(
   preferredRaw?: string,
 ): string {
   const source = sourceText.trim();
-  if (!source) return preferredRaw?.trim() || "";
+  if (!source) return (preferredRaw || "").trim();
+
+  const clauses = splitSentencesByBoundary(source);
+  const multiSentence = clauses.length > 1 || /[.!?].+\S/.test(source);
 
   const preferred = (preferredRaw || "").trim();
   if (
     preferred &&
+    preferred.length > 0 &&
     preferred.length < source.length &&
     source.toLowerCase().includes(preferred.toLowerCase())
   ) {
-    return preferred;
+    // Prefer Groq clause only if it is not the whole message
+    if (!(multiSentence && preferred === source)) {
+      return preferred;
+    }
   }
 
-  const clauses = splitSentencesByBoundary(source);
   const valueLower = value.toLowerCase();
   const valueTokens = valueLower.match(/[a-z0-9+#.-]+/g) || [];
 
@@ -2298,42 +2348,79 @@ export function findSmallestRawText(
     return scored[0]!;
   }
 
-  if (preferred && preferred.length <= source.length) return preferred;
-  // Last resort: first clause, not the whole multi-sentence message
-  return clauses[0]?.trim() || source;
+  // Last resort: first clause — never the full multi-sentence blob
+  if (clauses.length > 0) return clauses[0]!.trim();
+  return source;
 }
 
-/** Split compound tech values into atomic values with better attributes. */
+/** Detect project name from source text or existing facts. */
+export function detectProjectName(
+  sourceText: string,
+  facts: StructuredFact[] = [],
+): string | null {
+  for (const f of facts) {
+    const attr = canonicalizeAttribute(f.attribute);
+    if (attr === "project" && f.value.trim()) return cleanVal(f.value);
+    if (
+      attr === "project" ||
+      (f.scope === "project" &&
+        f.entity &&
+        !["user", "project", "session"].includes(f.entity.toLowerCase()))
+    ) {
+      if (f.entity && !["user", "project", "session", "my"].includes(f.entity.toLowerCase())) {
+        return f.entity.trim();
+      }
+    }
+  }
+  const m = sourceText.match(PROJECT_NAME_RE);
+  if (m?.[1]) return cleanVal(m[1]);
+  // "for MemoryBox" / "in MemoryBox"
+  const forProj = sourceText.match(/\b(?:for|in|on)\s+([A-Z][A-Za-z0-9_-]{2,})\b/);
+  if (forProj?.[1] && !["I", "I'"].includes(forProj[1])) {
+    const name = forProj[1];
+    if (!TECH_KEYWORDS.has(name.toLowerCase())) return name;
+  }
+  return null;
+}
+
+/** Split compound tech values into atomic "uses" (or database) facts. */
 export function splitAtomicUsageValues(value: string): Array<{ attr: string; value: string }> {
   const cleaned = cleanVal(value);
   if (!cleaned) return [];
 
-  // Already a single atomic tech token → keep
   const clauses = splitClauses(cleaned);
-  if (clauses.length <= 1) {
-    const single = inferAttributeFromClause(cleaned);
-    return [{ attr: single.attr === "technology" ? "usage" : single.attr, value: cleanVal(single.value) }];
-  }
+  const parts = clauses.length <= 1 ? [cleaned] : clauses;
 
   const out: Array<{ attr: string; value: string }> = [];
   const seen = new Set<string>();
-  for (const clause of clauses) {
-    const { attr, value: v } = inferAttributeFromClause(clause);
-    const val = cleanVal(v);
+  for (const clause of parts) {
+    const inferred = inferAttributeFromClause(clause);
+    const val = cleanVal(inferred.value);
     if (!val) continue;
-    const canonical = attr === "technology" ? "usage" : canonicalizeAttribute(attr);
-    const id = `${canonical}|${val.toLowerCase()}`;
+    // Strict: stack items → uses; only clear DB purpose → database
+    let attr = "uses";
+    if (
+      inferred.attr === "database" ||
+      (attributeForValue(val) === "database" && /\b(database|db|d1|postgres|neon|turso|sqlite)\b/i.test(clause))
+    ) {
+      // User example wants D1 as uses when listed with Workers/Redis.
+      // Only promote to database when purpose says so ("as the database" / "for database").
+      if (/\b(?:as|for)\s+(?:the\s+)?(?:database|db)\b/i.test(clause)) {
+        attr = "database";
+      }
+    }
+    const id = `${attr}|${val.toLowerCase()}`;
     if (seen.has(id)) continue;
     seen.add(id);
-    out.push({ attr: canonical, value: val });
+    out.push({ attr, value: val });
   }
-  return out.length > 0 ? out : [{ attr: "usage", value: cleaned }];
+  return out.length > 0 ? out : [{ attr: "uses", value: cleaned }];
 }
 
-function extractComparison(value: string): { value: string; over?: string } {
+function extractComparison(value: string): { value: string; preferred_over?: string } {
   const m = value.match(/^(.+?)\s+over\s+(.+)$/i) || value.match(/^(.+?)\s+than\s+(.+)$/i);
   if (!m || !m[1] || !m[2]) return { value: cleanVal(value) };
-  return { value: cleanVal(m[1]), over: cleanVal(m[2]) };
+  return { value: cleanVal(m[1]), preferred_over: cleanVal(m[2]) };
 }
 
 function extractCondition(text: string): string | undefined {
@@ -2342,19 +2429,20 @@ function extractCondition(text: string): string | undefined {
   return cleanVal(m[1].replace(/\s*[.!?]+$/, ""));
 }
 
+function extractStoppedReason(text: string): string | undefined {
+  const m = text.match(/\b(?:because|due\s+to|since)\s+(.+)$/i);
+  if (!m || !m[1]) return undefined;
+  return cleanVal(m[1].replace(/\s*[.!?]+$/, ""));
+}
+
 function isUserOwnedFact(fact: StructuredFact): boolean {
-  const attr = canonicalizeAttribute(fact.attribute);
+  const attr = canonicalizeAttribute(fact.attribute) || fact.attribute;
   if (USER_OWNED_ATTRIBUTES.has(attr)) return true;
-  if (attr.startsWith("favorite_") || attr.startsWith("preferred_") || attr.startsWith("disliked_")) {
-    return true;
-  }
   if (
     fact.memoryType === MemoryType.PREFERENCE ||
-    fact.memoryType === MemoryType.GOAL
+    fact.memoryType === MemoryType.GOAL ||
+    fact.memoryType === MemoryType.TEMPORARY_STATE
   ) {
-    return true;
-  }
-  if (fact.scope === "user" && (attr === "usage" || attr === "ownership" || attr === "decision")) {
     return true;
   }
   return false;
@@ -2365,56 +2453,33 @@ function looksLikePersonName(entity: string, knownNames: Set<string>): boolean {
   if (!e) return false;
   if (["user", "project", "session", "my", "we", "our"].includes(e.toLowerCase())) return false;
   if (knownNames.has(e.toLowerCase())) return true;
-  // Two+ capitalized tokens without tech keywords → likely a person name
   if (TECH_KEYWORDS.has(e.toLowerCase())) return false;
   const parts = e.split(/\s+/);
   if (parts.length >= 2 && parts.every((p) => /^[A-Z][a-z'-]*$/.test(p))) return true;
+  // Single capitalized token that matches a known name value
+  if (parts.length === 1 && knownNames.has(e.toLowerCase())) return true;
   return false;
 }
 
-function normalizePreferenceFact(fact: StructuredFact): StructuredFact {
-  const meta = { ...(fact.metadata || {}) };
-  let attribute = canonicalizeAttribute(fact.attribute);
-  let value = fact.value;
-  let memoryType = MemoryType.PREFERENCE;
-
-  // Comparison embedded in value → metadata.over
-  const cmp = extractComparison(value);
-  value = cmp.value;
-  if (cmp.over) meta.over = cmp.over;
-
-  const isNegative =
-    meta.polarity === "negative" ||
-    attribute === "dislike" ||
-    attribute === "avoid" ||
-    attribute.startsWith("disliked_") ||
-    /^(?:hate|dislike|avoid)/i.test(fact.attribute);
-
-  if (isNegative) {
-    meta.polarity = "negative";
-    const [domain] = detectPreferenceDomain(value);
-    attribute =
-      domain === "preference" || domain === "favorite_color"
-        ? domain === "favorite_color"
-          ? "disliked_color"
-          : `disliked_${slugify(value)}`
-        : `disliked_${domain}`;
-  } else if (attribute === "preference" || attribute === "prefer") {
-    const [domain] = detectPreferenceDomain(value, meta.over || "");
-    attribute = domain === "preference" ? "preference" : domain;
-  } else if (attribute.startsWith("favorite_") || attribute.startsWith("preferred_")) {
-    // keep
+function memoryTypeForAttribute(attr: string, state: FactState): MemoryType {
+  switch (attr) {
+    case "preference":
+    case "dislike":
+      return MemoryType.PREFERENCE;
+    case "goal":
+    case "plan":
+      return MemoryType.GOAL;
+    case "experiment":
+      return MemoryType.TEMPORARY_STATE;
+    case "database":
+      return MemoryType.DECISION;
+    case "uses":
+      return state === "planned" || state === "possible" || state === "conditional"
+        ? MemoryType.GOAL
+        : MemoryType.FACT;
+    default:
+      return MemoryType.FACT;
   }
-
-  return {
-    ...fact,
-    entity: "user",
-    attribute,
-    value,
-    memoryType,
-    scope: "user",
-    metadata: Object.keys(meta).length > 0 ? meta : undefined,
-  };
 }
 
 function deriveKeyForFact(fact: StructuredFact): string {
@@ -2422,14 +2487,61 @@ function deriveKeyForFact(fact: StructuredFact): string {
   const attr = slugify(fact.attribute);
   if (fact.attribute === "project") return "project.name";
   if (SINGLE_VALUE_ATTRIBUTES.has(attr)) return `${scope}.${attr}`;
-  // Multi-valued (usage / stack / preferences): include value so siblings survive
   return `${scope}.${attr}.${slugify(fact.value)}`;
+}
+
+function finalizeFact(
+  fact: Omit<StructuredFact, "key"> & { key?: string },
+  source: string,
+): StructuredFact | null {
+  const attribute = canonicalizeAttribute(fact.attribute);
+  if (!attribute) return null;
+  const value = cleanVal(fact.value);
+  if (!value || INVALID_KEYS.has(value.toLowerCase())) return null;
+
+  const state = fact.state || "current";
+  const scope = fact.scope || "user";
+  let entity = (fact.entity || "user").trim();
+
+  if (USER_OWNED_ATTRIBUTES.has(attribute) || scope === "user") {
+    if (attribute !== "project" && attribute !== "uses" && attribute !== "database") {
+      entity = "user";
+    }
+  }
+  if (USER_OWNED_ATTRIBUTES.has(attribute)) {
+    entity = "user";
+  }
+
+  const rawText = findSmallestRawText(source, value, fact.rawText);
+  // Hard rule: never keep full multi-sentence source as rawText
+  if (rawText === source.trim() && splitSentencesByBoundary(source).length > 1) {
+    return null; // cannot anchor — drop rather than store whole message
+  }
+
+  const out: StructuredFact = {
+    ...fact,
+    entity,
+    attribute,
+    value,
+    memoryType: memoryTypeForAttribute(attribute, state),
+    scope: attribute === "experiment" ? "session" : (scope as "user" | "project" | "session"),
+    state,
+    rawText,
+    metadata: fact.metadata && Object.keys(fact.metadata).length ? fact.metadata : undefined,
+    key: "",
+  };
+  if (attribute === "project") {
+    out.scope = "project";
+    out.entity = value;
+  }
+  out.key = deriveKeyForFact(out);
+  return out;
 }
 
 /**
  * Apply local semantic validation to Groq (or merged) facts:
- * normalize attributes/entities/states, expand compound usage, fix preferences,
- * drop invalid/redundant facts, and set clause-level rawText.
+ * strict canonical attributes, entity rules, atomic uses splits,
+ * preference/dislike/plan normalization, clause-level rawText, dedupe.
  */
 export function applyLocalSemanticValidation(
   facts: StructuredFact[],
@@ -2437,8 +2549,8 @@ export function applyLocalSemanticValidation(
 ): StructuredFact[] {
   const source = originalText.trim();
   const knownNames = new Set<string>();
+  const projectName = detectProjectName(source, facts);
 
-  // Collect declared names so we never use them as entity later
   for (const f of facts) {
     if (canonicalizeAttribute(f.attribute) === "name" && f.value) {
       knownNames.add(f.value.toLowerCase());
@@ -2446,235 +2558,320 @@ export function applyLocalSemanticValidation(
     }
   }
 
-  const projectScoped = PROJECT_SCOPE_HINT_RE.test(source);
+  const projectScoped =
+    PROJECT_SCOPE_HINT_RE.test(source) || Boolean(projectName);
   const expanded: StructuredFact[] = [];
 
   for (const raw of facts) {
     if (!raw || !raw.value?.trim() || !raw.attribute?.trim()) continue;
-
-    // Drop question-like values / attributes
     if (raw.value.trim().endsWith("?")) continue;
     if (INVALID_KEYS.has(raw.attribute.toLowerCase())) continue;
-    if (isPreferenceNoiseValue(raw.value) && raw.memoryType === MemoryType.PREFERENCE) continue;
 
-    let fact: StructuredFact = { ...raw, metadata: raw.metadata ? { ...raw.metadata } : undefined };
-    let attribute = canonicalizeAttribute(fact.attribute);
+    let attribute = canonicalizeAttribute(raw.attribute);
+    // Never invent attributes — unmapped names are rejected
+    if (!attribute) continue;
+
+    let fact: StructuredFact = {
+      ...raw,
+      attribute,
+      metadata: raw.metadata ? { ...raw.metadata } : undefined,
+    };
     let state = fact.state || "current";
-    let memoryType = fact.memoryType;
-    let scope = fact.scope || "user";
+    let scope: "user" | "project" | "session" = fact.scope || "user";
     let entity = fact.entity.trim();
-
-    // Type/state corrections from wording
-    const rawLower = `${fact.rawText || ""} ${source}`.toLowerCase();
     const valueClause = findSmallestRawText(source, fact.value, fact.rawText);
 
-    if (TEMPORARY_HINT_RE.test(valueClause) && (attribute === "usage" || attribute === "technology")) {
-      attribute = "temporary_state";
-      memoryType = MemoryType.TEMPORARY_STATE;
-      scope = "session";
-      state = "current";
-    }
-
-    // Past / stopped usage from type or wording
-    if (memoryType === MemoryType.FACT || attribute === "usage" || attribute === "technology") {
-      if (/\bstopped\s+using\b|\bno\s+longer\s+use\b|\bdon'?t\s+use\b.*\banymore\b/i.test(valueClause)) {
-        state = "stopped";
-        attribute = canonicalizeAttribute(attribute === "technology" ? "usage" : attribute);
-      } else if (/\bused\s+to\s+use\b|\bpreviously\s+used\b|\bi\s+used\b/i.test(valueClause) && !/\bnow\b/i.test(valueClause)) {
-        state = "past";
-      }
-    }
-
-    // Plans / goals must not become current usage
-    if (memoryType === MemoryType.GOAL || attribute === "plan" || attribute === "goal") {
-      if (attribute === "usage") attribute = "plan";
-      if (state === "current") state = attribute === "plan" ? "planned" : "planned";
-      memoryType = MemoryType.GOAL;
-    }
-
-    // Conditional / possible plan metadata
+    // Experiment / temporary — never permanent uses
     if (
-      (attribute === "plan" || memoryType === MemoryType.GOAL) &&
-      (state === "possible" || state === "conditional" || CONDITIONAL_HINT_RE.test(valueClause))
+      attribute === "experiment" ||
+      TEMPORARY_HINT_RE.test(valueClause) ||
+      fact.memoryType === MemoryType.TEMPORARY_STATE
     ) {
-      const cond = fact.metadata?.condition || extractCondition(valueClause);
-      const meta = { ...(fact.metadata || {}) };
-      if (cond) meta.condition = cond;
-      // Strip trailing condition from value when present
-      let value = fact.value.replace(/\s+\b(?:if|unless)\b.+$/i, "").trim();
-      value = cleanVal(value.replace(/^(?:use|using|to\s+use)\s+/i, "") || value);
-      if (CONDITIONAL_HINT_RE.test(valueClause) && state !== "possible") {
-        state = "conditional";
-      }
-      fact = { ...fact, value: value || fact.value, metadata: meta };
-      attribute = "plan";
-      memoryType = MemoryType.GOAL;
-    }
-
-    // Negation vs current usage in the supporting clause
-    if (
-      extractNegation(valueClause) &&
-      state === "current" &&
-      (attribute === "usage" || attribute === "technology" || attribute === "database")
-    ) {
-      // Prefer dislike if affect language; else stopped
-      if (/\b(?:don'?t|do\s+not)\s+(?:really\s+)?(?:like|love|enjoy)|hate|dislike|avoid\b/i.test(valueClause)) {
-        fact = normalizePreferenceFact({
-          ...fact,
-          attribute: "preference",
-          memoryType: MemoryType.PREFERENCE,
-          metadata: { ...(fact.metadata || {}), polarity: "negative" },
-          state: "current",
-          scope: "user",
-          entity: "user",
-        });
-        expanded.push({
-          ...fact,
-          rawText: valueClause,
-          key: deriveKeyForFact(fact),
-        });
+      if (
+        attribute === "uses" ||
+        attribute === "database" ||
+        TEMPORARY_HINT_RE.test(valueClause) ||
+        fact.memoryType === MemoryType.TEMPORARY_STATE
+      ) {
+        const finalized = finalizeFact(
+          {
+            ...fact,
+            entity: "user",
+            attribute: "experiment",
+            state: "current",
+            scope: "session",
+            rawText: valueClause,
+          },
+          source,
+        );
+        if (finalized) expanded.push(finalized);
         continue;
       }
-      state = "stopped";
-      attribute = attribute === "technology" ? "usage" : attribute;
     }
 
-    // Preferences / dislikes
+    // Drop questions / requests — never invent from interrogatives
     if (
-      memoryType === MemoryType.PREFERENCE ||
-      attribute === "preference" ||
-      attribute === "dislike" ||
-      attribute.startsWith("disliked_") ||
-      attribute.startsWith("favorite_")
+      valueClause.trim().endsWith("?") ||
+      isInterrogative(valueClause) ||
+      /^(?:what|why|how|when|where|who|which|should|can|could|would)\b/i.test(valueClause.trim())
     ) {
-      fact = normalizePreferenceFact({ ...fact, attribute, memoryType: MemoryType.PREFERENCE });
-      fact.state = "current";
-      fact.rawText = findSmallestRawText(source, fact.value, valueClause);
-      fact.key = deriveKeyForFact(fact);
-      expanded.push(fact);
       continue;
     }
 
-    // Expand compound usage into atomic facts
-    const isUsageLike =
-      attribute === "usage" ||
-      attribute === "technology" ||
-      memoryType === MemoryType.FACT ||
-      memoryType === MemoryType.DECISION;
-
+    // Preferences
     if (
-      isUsageLike &&
-      (attribute === "usage" || attribute === "technology" || /,&|\band\b|\bwith\b/i.test(fact.value))
+      (attribute === "preference" || fact.memoryType === MemoryType.PREFERENCE) &&
+      attribute !== "dislike"
     ) {
-      const parts = splitAtomicUsageValues(fact.value);
-      const useProject =
-        projectScoped ||
-        scope === "project" ||
-        /^(project|it|this|that|the\s+project|the\s+app)$/i.test(entity) ||
-        looksLikePersonName(entity, knownNames) ||
-        entity.toLowerCase() === "user";
-
-      for (const part of parts) {
-        let partAttr = canonicalizeAttribute(part.attr);
-        if (partAttr === "technology") partAttr = "usage";
-        // Prefer specific attrs from value classification
-        if (partAttr === "usage") {
-          const inferred = attributeForValue(part.value);
-          if (inferred !== "technology") partAttr = inferred;
-        }
-
-        const partScope = useProject ? "project" : scope;
-        const partEntity = useProject
-          ? "project"
-          : isUserOwnedFact({ ...fact, attribute: partAttr, scope: "user" })
-            ? "user"
-            : PRONOUN_SUBJECTS.has(entity.toLowerCase())
-              ? "project"
-              : looksLikePersonName(entity, knownNames)
-                ? "user"
-                : entity;
-
-        const atomic: StructuredFact = {
-          entity: partEntity,
-          attribute: partAttr,
-          value: part.value,
-          memoryType:
-            partAttr === "database" || partAttr === "runtime" || partAttr === "framework"
-              ? MemoryType.DECISION
-              : memoryType === MemoryType.TEMPORARY_STATE
-                ? MemoryType.TEMPORARY_STATE
-                : MemoryType.FACT,
-          rawText: findSmallestRawText(source, part.value, valueClause),
-          scope: partScope as "user" | "project" | "session",
-          state,
-          confidence: fact.confidence,
-          metadata: fact.metadata,
-          key: "",
-        };
-        atomic.key = deriveKeyForFact(atomic);
-        expanded.push(atomic);
+      const cmp = extractComparison(fact.value);
+      const meta: Record<string, string> = { ...(fact.metadata || {}) };
+      if (cmp.preferred_over) meta.preferred_over = cmp.preferred_over;
+      if (meta.over && !meta.preferred_over) {
+        meta.preferred_over = meta.over;
+        delete meta.over;
       }
+      const finalized = finalizeFact(
+        {
+          ...fact,
+          entity: "user",
+          attribute: "preference",
+          value: cmp.value,
+          state: "current",
+          scope: "user",
+          metadata: meta,
+          rawText: valueClause,
+        },
+        source,
+      );
+      if (finalized) expanded.push(finalized);
       continue;
     }
 
-    // Entity normalization
-    if (isUserOwnedFact({ ...fact, attribute, scope, memoryType })) {
-      entity = "user";
-      scope = scope === "session" ? scope : "user";
-    } else if (looksLikePersonName(entity, knownNames)) {
-      entity = scope === "project" ? "project" : "user";
-    } else if (PRONOUN_SUBJECTS.has(entity.toLowerCase())) {
-      entity = "project";
-      scope = "project";
-    } else if (entity.toLowerCase() === "my") {
-      entity = "user";
-      scope = "user";
+    // Dislikes — one normalized dislike
+    if (
+      attribute === "dislike" ||
+      /\b(?:don'?t|do\s+not)\s+(?:really\s+)?(?:like|love|enjoy)|hate|dislike|avoid\b/i.test(valueClause)
+    ) {
+      // If this was mis-tagged as current uses under negation → dislike
+      const finalized = finalizeFact(
+        {
+          ...fact,
+          entity: "user",
+          attribute: "dislike",
+          value: cleanVal(fact.value.replace(/\s+anymore\s*$/i, "")),
+          state: "current",
+          scope: "user",
+          rawText: valueClause,
+          metadata: undefined,
+        },
+        source,
+      );
+      if (finalized) expanded.push(finalized);
+      continue;
     }
 
-    // Name fact: entity must be user, value is the name
-    if (attribute === "name") {
-      entity = "user";
-      scope = "user";
-      memoryType = MemoryType.FACT;
+    // Goals / plans (+ conditional attach)
+    if (attribute === "goal" || attribute === "plan" || fact.memoryType === MemoryType.GOAL) {
+      const meta: Record<string, string> = { ...(fact.metadata || {}) };
+      let value = fact.value.replace(/\s+\b(?:if|unless)\b.+$/i, "").trim();
+      value = cleanVal(value.replace(/^(?:use|using|to\s+use|switch\s+to)\s+/i, "") || value);
+
+      // Reject condition-only fragments pretending to be goals
+      if (
+        /^(?:latency|pricing|cost|performance)\b/i.test(value) ||
+        /^if\b/i.test(valueClause.trim()) ||
+        (meta.condition && value.toLowerCase() === meta.condition.toLowerCase())
+      ) {
+        continue;
+      }
+
+      if (
+        state === "possible" ||
+        state === "conditional" ||
+        CONDITIONAL_HINT_RE.test(valueClause)
+      ) {
+        const cond = meta.condition || extractCondition(valueClause);
+        if (cond) meta.condition = cond;
+        if (state !== "possible") state = "conditional";
+        attribute = "plan";
+      } else if (attribute === "plan" || /\bplan\b/i.test(valueClause)) {
+        attribute = "plan";
+        state = "planned";
+      } else {
+        attribute = "goal";
+        state = "planned";
+      }
+
+      const finalized = finalizeFact(
+        {
+          ...fact,
+          entity: "user",
+          attribute,
+          value: value || fact.value,
+          state,
+          scope: "user",
+          metadata: meta,
+          rawText: valueClause,
+        },
+        source,
+      );
+      if (finalized) expanded.push(finalized);
+      continue;
+    }
+
+    // Name / occupation / project identity
+    if (attribute === "name" || attribute === "occupation") {
+      const finalized = finalizeFact(
+        {
+          ...fact,
+          entity: "user",
+          attribute,
+          state: "current",
+          scope: "user",
+          rawText: valueClause,
+        },
+        source,
+      );
+      if (finalized) expanded.push(finalized);
+      continue;
     }
 
     if (attribute === "project") {
-      scope = "project";
-      entity = cleanVal(fact.value) || entity;
-      memoryType = MemoryType.FACT;
+      const finalized = finalizeFact(
+        {
+          ...fact,
+          attribute: "project",
+          value: cleanVal(fact.value),
+          state: "current",
+          scope: "project",
+          entity: cleanVal(fact.value),
+          rawText: valueClause,
+        },
+        source,
+      );
+      if (finalized) expanded.push(finalized);
+      continue;
     }
 
-    const normalized: StructuredFact = {
-      ...fact,
-      entity,
-      attribute,
-      value: cleanVal(fact.value),
-      memoryType,
-      scope: scope as "user" | "project" | "session",
-      state,
-      rawText: findSmallestRawText(source, cleanVal(fact.value), valueClause),
-      confidence: fact.confidence,
-      metadata: fact.metadata,
-      key: "",
-    };
-    normalized.key = deriveKeyForFact(normalized);
-    if (!normalized.value) continue;
-    expanded.push(normalized);
+    // Uses / database — past, stopped, current; split compounds
+    if (attribute === "uses" || attribute === "database") {
+      const meta = { ...(fact.metadata || {}) };
+
+      if (/\bstopped\s+using\b|\bno\s+longer\s+use\b|\bdon'?t\s+use\b.*\banymore\b/i.test(valueClause)) {
+        state = "stopped";
+        const reason = meta.reason || extractStoppedReason(valueClause);
+        if (reason) meta.reason = reason;
+        // Strip reason from value if embedded
+        fact = {
+          ...fact,
+          value: cleanVal(fact.value.replace(/\s+(?:because|due\s+to|since)\s+.+$/i, "")),
+        };
+      } else if (
+        /\bused\s+to\s+use\b|\bpreviously\s+used\b|(?:^|\b)i\s+used\b/i.test(valueClause) &&
+        !/\bnow\b/i.test(valueClause)
+      ) {
+        state = "past";
+      } else if (extractNegation(valueClause) && state === "current") {
+        // Negated like without dislike verbs already handled → stopped
+        state = "stopped";
+      } else {
+        state = state === "past" || state === "stopped" ? state : "current";
+      }
+
+      const parts =
+        /,&|\band\b|\bwith\b/i.test(fact.value) || attribute === "uses"
+          ? splitAtomicUsageValues(fact.value)
+          : [{ attr: attribute, value: cleanVal(fact.value) }];
+
+      // If single non-compound database, keep as database
+      const useParts =
+        attribute === "database" && parts.length === 1
+          ? [{ attr: "database", value: parts[0]!.value }]
+          : parts;
+
+      const entityForProject =
+        projectName ||
+        (projectScoped
+          ? "project"
+          : looksLikePersonName(entity, knownNames) || entity.toLowerCase() === "user"
+            ? projectName || "project"
+            : PRONOUN_SUBJECTS.has(entity.toLowerCase())
+              ? projectName || "project"
+              : entity);
+
+      const scopedToProject =
+        projectScoped ||
+        scope === "project" ||
+        Boolean(projectName) ||
+        PRONOUN_SUBJECTS.has(entity.toLowerCase());
+
+      for (const part of useParts) {
+        const partAttr = canonicalizeAttribute(part.attr) || "uses";
+        if (partAttr !== "uses" && partAttr !== "database") continue;
+
+        const finalized = finalizeFact(
+          {
+            entity: scopedToProject ? entityForProject : "user",
+            attribute: partAttr,
+            value: part.value,
+            memoryType: MemoryType.FACT,
+            state,
+            scope: scopedToProject ? "project" : "user",
+            confidence: fact.confidence,
+            metadata: Object.keys(meta).length ? meta : undefined,
+            rawText: findSmallestRawText(source, part.value, valueClause),
+          },
+          source,
+        );
+        if (finalized) {
+          // Personal uses (no project context) stay on user
+          if (!scopedToProject) {
+            finalized.entity = "user";
+            finalized.scope = "user";
+            finalized.key = deriveKeyForFact(finalized);
+          } else if (looksLikePersonName(finalized.entity, knownNames)) {
+            finalized.entity = projectName || "project";
+            finalized.key = deriveKeyForFact(finalized);
+          }
+          expanded.push(finalized);
+        }
+      }
+      continue;
+    }
+
+    // Fallback — only if still canonical
+    const finalized = finalizeFact(
+      {
+        ...fact,
+        entity: isUserOwnedFact(fact)
+          ? "user"
+          : looksLikePersonName(entity, knownNames)
+            ? "user"
+            : entity,
+        attribute,
+        state,
+        scope,
+        rawText: valueClause,
+      },
+      source,
+    );
+    if (finalized) expanded.push(finalized);
   }
 
-  // Drop standalone condition-only / filler facts
+  // Drop condition-only / invalid / whole-message rawText
   const filtered = expanded.filter((f) => {
-    if (!f.value || INVALID_KEYS.has(f.value.toLowerCase())) return false;
+    if (!f.value) return false;
+    if (!CANONICAL_ATTRIBUTES.has(f.attribute)) return false;
     if (f.attribute === "condition") return false;
-    // Temporary experimentation already typed — keep; bare conversational filler already gated
+    const clauses = splitSentencesByBoundary(source);
+    if (clauses.length > 1 && f.rawText.trim() === source) return false;
     return true;
   });
 
-  const resolved = resolveEntities(filtered);
-  return deduplicateFacts(resolved);
+  return deduplicateFacts(resolveEntities(filtered, knownNames, projectName));
 }
 
-/** Deduplicate facts by semantic identity (not attribute alone). */
+/** Deduplicate facts by semantic identity. */
 export function deduplicateFacts(facts: StructuredFact[]): StructuredFact[] {
   const seen = new Map<string, StructuredFact>();
   for (const fact of facts) {
@@ -2684,35 +2881,32 @@ export function deduplicateFacts(facts: StructuredFact[]): StructuredFact[] {
       seen.set(key, fact);
       continue;
     }
-    // Prefer higher confidence; merge metadata
     const keep =
       (fact.confidence || 0) > (existing.confidence || 0) ? fact : existing;
     const drop = keep === fact ? existing : fact;
     if (drop.metadata || keep.metadata) {
-      keep.metadata = { ...(drop.metadata || {}), ...(keep.metadata || {}) };
-    }
-    // Negative preference wins over duplicate positive of same value when polarity set
-    if (drop.metadata?.polarity === "negative") {
-      keep.metadata = { ...(keep.metadata || {}), polarity: "negative" };
-      if (!keep.attribute.startsWith("disliked_")) {
-        Object.assign(keep, normalizePreferenceFact({ ...keep, metadata: keep.metadata }));
-        keep.key = deriveKeyForFact(keep);
+      const mergedMeta: Record<string, string> = {
+        ...(drop.metadata || {}),
+        ...(keep.metadata || {}),
+      };
+      if (mergedMeta.over && !mergedMeta.preferred_over) {
+        mergedMeta.preferred_over = mergedMeta.over;
+        delete mergedMeta.over;
       }
+      keep.metadata = mergedMeta;
     }
+    keep.key = deriveKeyForFact(keep);
     seen.set(key, keep);
   }
 
-  // Extra pass: collapse multiple negative prefs for the same value
-  const byNegValue = new Map<string, StructuredFact>();
+  // Collapse duplicate dislikes for the same value
+  const byDislike = new Map<string, StructuredFact>();
   const out: StructuredFact[] = [];
   for (const fact of seen.values()) {
-    const neg =
-      fact.metadata?.polarity === "negative" || fact.attribute.startsWith("disliked_");
-    if (neg) {
+    if (fact.attribute === "dislike") {
       const vk = slugify(fact.value);
-      const prev = byNegValue.get(vk);
-      if (prev) continue;
-      byNegValue.set(vk, fact);
+      if (byDislike.has(vk)) continue;
+      byDislike.set(vk, fact);
     }
     out.push(fact);
   }
@@ -2720,23 +2914,27 @@ export function deduplicateFacts(facts: StructuredFact[]): StructuredFact[] {
 }
 
 /** Normalize entity names to canonical form. */
-export function resolveEntities(facts: StructuredFact[]): StructuredFact[] {
+export function resolveEntities(
+  facts: StructuredFact[],
+  knownNames: Set<string> = new Set(),
+  projectName: string | null = null,
+): StructuredFact[] {
   const entityMap: Record<string, string> = {
-    it: "project",
-    this: "project",
-    that: "project",
-    "the project": "project",
-    "the app": "project",
-    "the system": "project",
+    it: projectName || "project",
+    this: projectName || "project",
+    that: projectName || "project",
+    "the project": projectName || "project",
+    "the app": projectName || "project",
+    "the system": projectName || "project",
+    project: projectName || "project",
     we: "user",
     our: "user",
     my: "user",
   };
 
-  const userNames = new Set<string>();
   for (const fact of facts) {
     if (canonicalizeAttribute(fact.attribute) === "name") {
-      userNames.add(fact.value.toLowerCase());
+      knownNames.add(fact.value.toLowerCase());
     }
   }
 
@@ -2745,14 +2943,30 @@ export function resolveEntities(facts: StructuredFact[]): StructuredFact[] {
     if (entityMap[lower]) {
       fact.entity = entityMap[lower];
     }
-    if (userNames.has(lower) || (isUserOwnedFact(fact) && lower !== "user" && lower !== "project")) {
-      if (fact.scope !== "project" || isUserOwnedFact(fact)) {
-        fact.entity = fact.scope === "project" && !isUserOwnedFact(fact) ? "project" : "user";
+    if (knownNames.has(lower) || looksLikePersonName(fact.entity, knownNames)) {
+      if (USER_OWNED_ATTRIBUTES.has(fact.attribute) || fact.scope === "user") {
+        fact.entity = "user";
+      } else if (fact.scope === "project") {
+        fact.entity = projectName || "project";
+      } else {
+        fact.entity = "user";
       }
     }
-    if (isUserOwnedFact(fact)) {
+    if (USER_OWNED_ATTRIBUTES.has(fact.attribute)) {
       fact.entity = "user";
-      if (fact.scope !== "session") fact.scope = "user";
+      if (fact.attribute !== "experiment") fact.scope = "user";
+    }
+    if (fact.attribute === "project") {
+      fact.scope = "project";
+      fact.entity = fact.value;
+    }
+    if (
+      (fact.attribute === "uses" || fact.attribute === "database") &&
+      fact.scope === "project" &&
+      (fact.entity === "project" || looksLikePersonName(fact.entity, knownNames)) &&
+      projectName
+    ) {
+      fact.entity = projectName;
     }
     fact.key = deriveKeyForFact(fact);
   }
@@ -2766,9 +2980,40 @@ export function mergeFacts(
   localFacts: StructuredFact[],
   groqFacts: StructuredFact[],
 ): StructuredFact[] {
+  // Re-validate the union so local invented attrs (technology, etc.) are normalized
+  const source =
+    groqFacts[0]?.rawText ||
+    localFacts[0]?.rawText ||
+    "";
+  // Prefer applying validation when we have source context from either side
   const all = [...localFacts, ...groqFacts];
-  const resolved = resolveEntities(all);
-  return deduplicateFacts(resolved);
+  if (source && splitSentencesByBoundary(source).length >= 1) {
+    // Use longest rawText as source approximation when merging without original
+    const longest = all.reduce((a, b) => (a.rawText.length >= b.rawText.length ? a : b)).rawText;
+    // If local facts already have short rawText, just resolve+dedupe after soft canonicalize
+    const normalized = all
+      .map((f) => {
+        const attr = canonicalizeAttribute(f.attribute);
+        if (!attr) return null;
+        const copy = { ...f, attribute: attr };
+        if (USER_OWNED_ATTRIBUTES.has(attr)) {
+          copy.entity = "user";
+          if (attr !== "experiment") copy.scope = "user";
+        }
+        if (copy.metadata?.over && !copy.metadata.preferred_over) {
+          copy.metadata = {
+            ...copy.metadata,
+            preferred_over: copy.metadata.over,
+          };
+          delete copy.metadata.over;
+        }
+        copy.key = deriveKeyForFact(copy);
+        return copy;
+      })
+      .filter((f): f is StructuredFact => f !== null);
+    return deduplicateFacts(resolveEntities(normalized));
+  }
+  return deduplicateFacts(resolveEntities(all));
 }
 
 // ============================================================

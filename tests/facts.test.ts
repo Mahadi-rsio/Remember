@@ -13,6 +13,7 @@ import {
   applyLocalSemanticValidation,
   mergeFacts,
   GROQ_FACT_SCHEMA,
+  CANONICAL_ATTRIBUTES,
   type GroqFactInput,
 } from "../src/memory/facts";
 import { MemoryType } from "../src/models/memory";
@@ -285,10 +286,26 @@ function groqFact(partial: Record<string, unknown>) {
     scope: null,
     confidence: 0.9,
     rawText: "",
-    metadata: { over: null, condition: null, polarity: null, reason: null },
+    metadata: { preferred_over: null, condition: null, reason: null },
     ...partial,
   };
 }
+
+const MEMORYBOX_MESSAGE = [
+  "My name is Alex.",
+  "I am a full-stack developer.",
+  "I am building a project called MemoryBox.",
+  "I use Cloudflare Workers with D1 and Redis for MemoryBox.",
+  "I used MongoDB.",
+  "I stopped using Firebase because of pricing.",
+  "I prefer MUI over shadcn.",
+  "I don't like Bootstrap.",
+  "I avoid Bootstrap.",
+  "I plan to use Neon.",
+  "I might switch to PlanetScale if latency is high.",
+  "I am experimenting with Bun.",
+  "What do you think about Redis?",
+].join(" ");
 
 describe("Groq Integration (mocked HTTP)", () => {
   it("forces entity=user for identity and keeps clause-level rawText", async () => {
@@ -321,24 +338,32 @@ describe("Groq Integration (mocked HTTP)", () => {
     expect(facts[0].rawText).toBe("I am Mahadi Hasan.");
   });
 
-  it("rejects invalid confidence and unknown types", async () => {
+  it("rejects invalid confidence, unknown types, and invented attributes", async () => {
     const ex = createGroqExtractor({
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: "k",
       fetchImpl: mockFetch(
         JSON.stringify({
           facts: [
-            groqFact({ entity: "a", attribute: "b", value: "c", type: "identity", confidence: 2.5 }),
-            groqFact({ entity: "a", attribute: "b", value: "c", type: "alien_concept", confidence: 0.9 }),
+            groqFact({ entity: "a", attribute: "name", value: "c", type: "identity", confidence: 2.5 }),
+            groqFact({ entity: "a", attribute: "name", value: "c", type: "alien_concept", confidence: 0.9 }),
+            groqFact({
+              entity: "user",
+              attribute: "favorite_snack",
+              value: "chips",
+              type: "identity",
+              confidence: 0.9,
+              rawText: "I like chips",
+            }),
           ],
         }),
       ),
     });
-    const facts = await ex.extract("test input");
+    const facts = await ex.extract("I like chips");
     expect(facts).toHaveLength(0);
   });
 
-  it("local validation blocks 'I don't like MongoDB' from becoming current usage", async () => {
+  it("local validation blocks 'I don't like MongoDB' from becoming current uses", async () => {
     const message = "I don't like MongoDB anymore.";
     const res = await extractStructuredFactsHybrid(message, {
       groqApiKey: "fake",
@@ -349,7 +374,7 @@ describe("Groq Integration (mocked HTTP)", () => {
           facts: [
             groqFact({
               entity: "user",
-              attribute: "technology",
+              attribute: "uses",
               value: "MongoDB",
               type: "usage",
               state: "current",
@@ -361,15 +386,12 @@ describe("Groq Integration (mocked HTTP)", () => {
         }),
       ),
     });
-    const usage = res.facts.filter(
-      (f) =>
-        (f.attribute === "technology" || f.attribute === "usage") &&
-        f.state === "current",
-    );
+    const usage = res.facts.filter((f) => f.attribute === "uses" && f.state === "current");
     expect(usage).toHaveLength(0);
+    expect(res.facts.some((f) => f.attribute === "dislike" && /mongodb/i.test(f.value))).toBe(true);
   });
 
-  it("splits project stack usage into atomic scoped facts", async () => {
+  it("splits project stack into atomic uses facts", async () => {
     const message = "I use Cloudflare Workers with D1 and Redis for my project";
     const ex = createGroqExtractor({
       baseUrl: "https://api.groq.com/openai/v1",
@@ -379,7 +401,7 @@ describe("Groq Integration (mocked HTTP)", () => {
           facts: [
             groqFact({
               entity: "Mahadi",
-              attribute: "usage",
+              attribute: "uses",
               value: "Cloudflare Workers with D1 and Redis",
               type: "usage",
               state: "current",
@@ -394,6 +416,7 @@ describe("Groq Integration (mocked HTTP)", () => {
     const facts = await ex.extract(message);
     expect(facts.length).toBeGreaterThanOrEqual(3);
     expect(facts.every((f) => f.entity !== "Mahadi")).toBe(true);
+    expect(facts.every((f) => f.attribute === "uses")).toBe(true);
     expect(facts.every((f) => f.scope === "project")).toBe(true);
     const values = facts.map((f) => f.value.toLowerCase());
     expect(values.some((v) => v.includes("cloudflare") || v.includes("workers"))).toBe(true);
@@ -401,7 +424,7 @@ describe("Groq Integration (mocked HTTP)", () => {
     expect(values.some((v) => v.includes("redis"))).toBe(true);
   });
 
-  it("keeps preference comparisons in metadata, not value", async () => {
+  it("keeps preference comparisons in preferred_over metadata", async () => {
     const message = "I prefer MUI over shadcn.";
     const ex = createGroqExtractor({
       baseUrl: "https://api.groq.com/openai/v1",
@@ -424,14 +447,15 @@ describe("Groq Integration (mocked HTTP)", () => {
     const facts = await ex.extract(message);
     expect(facts).toHaveLength(1);
     expect(facts[0].entity).toBe("user");
+    expect(facts[0].attribute).toBe("preference");
     expect(facts[0].value.toLowerCase()).toBe("mui");
     expect(facts[0].value.toLowerCase().includes("over")).toBe(false);
-    expect(facts[0].metadata?.over?.toLowerCase()).toContain("shadcn");
+    expect(facts[0].metadata?.preferred_over?.toLowerCase()).toContain("shadcn");
   });
 
   it("normalizes past/stopped/plan states and conditional metadata", async () => {
     const message =
-      "I used MongoDB. I stopped using Firebase. I plan to use Neon. I might use Redis if latency is high.";
+      "I used MongoDB. I stopped using Firebase because of pricing. I plan to use Neon. I might use Redis if latency is high.";
     const ex = createGroqExtractor({
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: "k",
@@ -439,18 +463,19 @@ describe("Groq Integration (mocked HTTP)", () => {
         JSON.stringify({
           facts: [
             groqFact({
-              attribute: "usage",
+              attribute: "uses",
               value: "MongoDB",
               type: "past_usage",
               state: "past",
               rawText: "I used MongoDB.",
             }),
             groqFact({
-              attribute: "usage",
+              attribute: "uses",
               value: "Firebase",
               type: "stopped_usage",
               state: "stopped",
-              rawText: "I stopped using Firebase.",
+              rawText: "I stopped using Firebase because of pricing.",
+              metadata: { preferred_over: null, condition: null, reason: "pricing" },
             }),
             groqFact({
               attribute: "plan",
@@ -466,16 +491,15 @@ describe("Groq Integration (mocked HTTP)", () => {
               state: "conditional",
               rawText: "I might use Redis if latency is high.",
               metadata: {
-                over: null,
+                preferred_over: null,
                 condition: "latency is high",
-                polarity: null,
                 reason: null,
               },
             }),
             groqFact({
-              attribute: "condition",
+              attribute: "goal",
               value: "latency is high",
-              type: "fact",
+              type: "goal",
               state: "current",
               rawText: "if latency is high",
             }),
@@ -485,7 +509,9 @@ describe("Groq Integration (mocked HTTP)", () => {
     });
     const facts = await ex.extract(message);
     expect(facts.find((f) => f.value === "MongoDB")?.state).toBe("past");
-    expect(facts.find((f) => f.value === "Firebase")?.state).toBe("stopped");
+    const stopped = facts.find((f) => f.value === "Firebase");
+    expect(stopped?.state).toBe("stopped");
+    expect(stopped?.metadata?.reason?.toLowerCase()).toContain("pricing");
     const plan = facts.find((f) => f.attribute === "plan" && f.value === "Neon");
     expect(plan?.state).toBe("planned");
     expect(plan?.memoryType).toBe(MemoryType.GOAL);
@@ -493,10 +519,11 @@ describe("Groq Integration (mocked HTTP)", () => {
     expect(conditional?.attribute).toBe("plan");
     expect(["conditional", "possible"]).toContain(conditional?.state);
     expect(conditional?.metadata?.condition?.toLowerCase()).toContain("latency");
-    expect(facts.some((f) => f.attribute === "condition")).toBe(false);
+    // Condition must not become its own unrelated fact
+    expect(facts.some((f) => /latency is high/i.test(f.value) && f.attribute !== "plan")).toBe(false);
   });
 
-  it("collapses duplicate dislikes into one negative preference", async () => {
+  it("collapses duplicate dislikes into one dislike fact", async () => {
     const message = "I don't like MongoDB. I avoid MongoDB. I hate MongoDB.";
     const ex = createGroqExtractor({
       baseUrl: "https://api.groq.com/openai/v1",
@@ -509,37 +536,30 @@ describe("Groq Integration (mocked HTTP)", () => {
               value: "MongoDB",
               type: "dislike",
               rawText: "I don't like MongoDB.",
-              metadata: { over: null, condition: null, polarity: "negative", reason: null },
             }),
             groqFact({
-              attribute: "preference",
+              attribute: "dislike",
               value: "MongoDB",
               type: "dislike",
               rawText: "I avoid MongoDB.",
-              metadata: { over: null, condition: null, polarity: "negative", reason: null },
             }),
             groqFact({
               attribute: "dislike",
               value: "MongoDB",
               type: "dislike",
               rawText: "I hate MongoDB.",
-              metadata: { over: null, condition: null, polarity: "negative", reason: null },
             }),
           ],
         }),
       ),
     });
     const facts = await ex.extract(message);
-    const neg = facts.filter(
-      (f) =>
-        f.value.toLowerCase() === "mongodb" &&
-        (f.metadata?.polarity === "negative" || f.attribute.startsWith("disliked_")),
-    );
+    const neg = facts.filter((f) => f.attribute === "dislike" && f.value.toLowerCase() === "mongodb");
     expect(neg).toHaveLength(1);
   });
 
-  it("does not treat temporary experimentation as permanent usage", async () => {
-    const message = "I'm testing Redis for a bit.";
+  it("does not treat temporary experimentation as permanent uses", async () => {
+    const message = "I'm experimenting with Redis for a bit.";
     const ex = createGroqExtractor({
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: "k",
@@ -547,7 +567,7 @@ describe("Groq Integration (mocked HTTP)", () => {
         JSON.stringify({
           facts: [
             groqFact({
-              attribute: "usage",
+              attribute: "uses",
               value: "Redis",
               type: "usage",
               state: "current",
@@ -558,8 +578,185 @@ describe("Groq Integration (mocked HTTP)", () => {
       ),
     });
     const facts = await ex.extract(message);
-    expect(facts.some((f) => f.attribute === "usage" && f.state === "current")).toBe(false);
-    expect(facts.some((f) => f.memoryType === MemoryType.TEMPORARY_STATE)).toBe(true);
+    expect(facts.some((f) => f.attribute === "uses" && f.state === "current")).toBe(false);
+    expect(facts.some((f) => f.attribute === "experiment")).toBe(true);
+  });
+
+  it("normalizes the long MemoryBox example into clean atomic facts", async () => {
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              entity: "Alex",
+              attribute: "name",
+              value: "Alex",
+              type: "identity",
+              rawText: MEMORYBOX_MESSAGE,
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "occupation",
+              value: "full-stack developer",
+              type: "identity",
+              rawText: MEMORYBOX_MESSAGE,
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "project",
+              value: "MemoryBox",
+              type: "identity",
+              rawText: MEMORYBOX_MESSAGE,
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "uses",
+              value: "Cloudflare Workers with D1 and Redis",
+              type: "usage",
+              rawText: MEMORYBOX_MESSAGE,
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "uses",
+              value: "MongoDB",
+              type: "past_usage",
+              state: "past",
+              rawText: MEMORYBOX_MESSAGE,
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "uses",
+              value: "Firebase",
+              type: "stopped_usage",
+              state: "stopped",
+              rawText: MEMORYBOX_MESSAGE,
+              metadata: { preferred_over: null, condition: null, reason: "pricing" },
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "preference",
+              value: "MUI over shadcn",
+              type: "preference",
+              rawText: MEMORYBOX_MESSAGE,
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "dislike",
+              value: "Bootstrap",
+              type: "dislike",
+              rawText: "I don't like Bootstrap.",
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "dislike",
+              value: "Bootstrap",
+              type: "dislike",
+              rawText: "I avoid Bootstrap.",
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "plan",
+              value: "Neon",
+              type: "plan",
+              state: "planned",
+              rawText: "I plan to use Neon.",
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "plan",
+              value: "PlanetScale",
+              type: "possible_plan",
+              state: "conditional",
+              rawText: "I might switch to PlanetScale if latency is high.",
+              metadata: {
+                preferred_over: null,
+                condition: "latency is high",
+                reason: null,
+              },
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "uses",
+              value: "Bun",
+              type: "usage",
+              state: "current",
+              rawText: "I am experimenting with Bun.",
+            }),
+            groqFact({
+              entity: "Alex",
+              attribute: "preference",
+              value: "Redis",
+              type: "preference",
+              rawText: "What do you think about Redis?",
+            }),
+          ],
+        }),
+      ),
+    });
+
+    const facts = await ex.extract(MEMORYBOX_MESSAGE);
+
+    // No invented attributes
+    expect(facts.every((f) => CANONICAL_ATTRIBUTES.has(f.attribute))).toBe(true);
+    // Never use the person's name as entity
+    expect(facts.every((f) => f.entity !== "Alex")).toBe(true);
+    // Never store the entire message as rawText
+    expect(facts.every((f) => f.rawText !== MEMORYBOX_MESSAGE)).toBe(true);
+    expect(facts.every((f) => f.rawText.length < MEMORYBOX_MESSAGE.length)).toBe(true);
+
+    const byAttr = (a: string) => facts.filter((f) => f.attribute === a);
+
+    expect(byAttr("name")).toHaveLength(1);
+    expect(byAttr("name")[0].entity).toBe("user");
+    expect(byAttr("name")[0].value).toBe("Alex");
+
+    expect(byAttr("occupation")[0].entity).toBe("user");
+    expect(byAttr("occupation")[0].value.toLowerCase()).toContain("full-stack");
+
+    expect(byAttr("project")[0].value).toBe("MemoryBox");
+    expect(byAttr("project")[0].entity).toBe("MemoryBox");
+
+    const uses = byAttr("uses");
+    const currentUses = uses.filter((f) => f.state === "current");
+    expect(currentUses.length).toBeGreaterThanOrEqual(3);
+    expect(currentUses.every((f) => f.entity === "MemoryBox" || f.scope === "project")).toBe(true);
+    const currentVals = currentUses.map((f) => f.value.toLowerCase());
+    expect(currentVals.some((v) => v.includes("cloudflare") || v.includes("workers"))).toBe(true);
+    expect(currentVals.some((v) => v.includes("d1"))).toBe(true);
+    expect(currentVals.some((v) => v.includes("redis"))).toBe(true);
+
+    expect(uses.find((f) => /mongodb/i.test(f.value))?.state).toBe("past");
+    const firebase = uses.find((f) => /firebase/i.test(f.value));
+    expect(firebase?.state).toBe("stopped");
+    expect(firebase?.metadata?.reason?.toLowerCase()).toContain("pricing");
+
+    const pref = byAttr("preference");
+    expect(pref).toHaveLength(1);
+    expect(pref[0].value.toLowerCase()).toBe("mui");
+    expect(pref[0].metadata?.preferred_over?.toLowerCase()).toContain("shadcn");
+
+    expect(byAttr("dislike")).toHaveLength(1);
+    expect(byAttr("dislike")[0].value.toLowerCase()).toBe("bootstrap");
+
+    const plans = byAttr("plan");
+    expect(plans.find((f) => /neon/i.test(f.value))?.state).toBe("planned");
+    const conditional = plans.find((f) => /planetscale/i.test(f.value));
+    expect(["conditional", "possible"]).toContain(conditional?.state);
+    expect(conditional?.metadata?.condition?.toLowerCase()).toContain("latency");
+
+    expect(byAttr("experiment").some((f) => /bun/i.test(f.value))).toBe(true);
+    expect(facts.some((f) => f.attribute === "uses" && /bun/i.test(f.value) && f.state === "current")).toBe(
+      false,
+    );
+
+    // Question about Redis must not invent a preference
+    expect(pref.every((f) => !/redis/i.test(f.value))).toBe(true);
+
+    // Semantic dedupe: no duplicate dislike / identical uses
+    const keys = facts.map((f) => `${f.attribute}|${f.value.toLowerCase()}|${f.state}`);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("falls back to local facts when Groq fails", async () => {
@@ -572,7 +769,7 @@ describe("Groq Integration (mocked HTTP)", () => {
     });
     expect(res.route).toBe("local");
     expect(res.facts.length).toBeGreaterThan(0);
-    expect(res.facts[0].metadata?.over?.toLowerCase()).toContain("ant");
+    expect(res.facts[0].metadata?.preferred_over?.toLowerCase()).toContain("ant");
   });
 
   it("merges and deduplicates local + Groq facts", async () => {
@@ -591,7 +788,7 @@ describe("Groq Integration (mocked HTTP)", () => {
               rawText: "I prefer Material UI over Ant Design",
             }),
             groqFact({
-              attribute: "editor",
+              attribute: "uses",
               value: "Neovim",
               type: "usage",
               state: "current",
@@ -609,11 +806,11 @@ describe("Groq Integration (mocked HTTP)", () => {
   it("deduplicates facts via mergeFacts helper", () => {
     const fact = {
       entity: "user",
-      attribute: "usage",
+      attribute: "uses",
       value: "Neon",
       memoryType: MemoryType.FACT,
       rawText: "t",
-      key: "user.usage.neon",
+      key: "user.uses.neon",
       scope: "user" as const,
       state: "current" as const,
       confidence: 0.9,
@@ -622,13 +819,30 @@ describe("Groq Integration (mocked HTTP)", () => {
     expect(merged).toHaveLength(1);
   });
 
-  it("exposes a strict schema with rawText and metadata", () => {
+  it("exposes a strict schema with canonical attributes and preferred_over", () => {
     expect(GROQ_FACT_SCHEMA.additionalProperties).toBe(false);
     const items = (GROQ_FACT_SCHEMA.properties.facts as {
-      items: { additionalProperties: boolean; required: string[] };
+      items: {
+        additionalProperties: boolean;
+        required: string[];
+        properties: { attribute: { enum: string[] }; metadata: { required: string[] } };
+      };
     }).items;
     expect(items.additionalProperties).toBe(false);
     expect(items.required).toContain("rawText");
     expect(items.required).toContain("metadata");
+    expect(items.properties.attribute.enum).toEqual([
+      "name",
+      "occupation",
+      "project",
+      "uses",
+      "database",
+      "preference",
+      "dislike",
+      "experiment",
+      "goal",
+      "plan",
+    ]);
+    expect(items.properties.metadata.required).toContain("preferred_over");
   });
 });
