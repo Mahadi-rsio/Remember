@@ -275,15 +275,46 @@ function mockFetch(content: string | null, capture?: { body?: string[] }): typeo
   }) as typeof fetch;
 }
 
+function groqFact(partial: Record<string, unknown>) {
+  return {
+    entity: "user",
+    attribute: "name",
+    value: "x",
+    type: "identity",
+    state: "current",
+    scope: null,
+    confidence: 0.9,
+    rawText: "",
+    metadata: { over: null, condition: null, polarity: null, reason: null },
+    ...partial,
+  };
+}
+
 describe("Groq Integration (mocked HTTP)", () => {
-  it("validates scope null → user, maps types and sets rawText to source", async () => {
-    const ex = createGroqExtractor({ baseUrl: "https://api.groq.com/openai/v1", apiKey: "k", fetchImpl: mockFetch(JSON.stringify({
-      facts: [
-        { entity: "Mahadi Hasan", attribute: "name", value: "Mahadi Hasan", type: "identity", state: "current", scope: null, confidence: 1.0 },
-      ],
-    })) });
+  it("forces entity=user for identity and keeps clause-level rawText", async () => {
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              entity: "Mahadi Hasan",
+              attribute: "name",
+              value: "Mahadi Hasan",
+              type: "identity",
+              state: "current",
+              scope: null,
+              confidence: 1.0,
+              rawText: "I am Mahadi Hasan.",
+            }),
+          ],
+        }),
+      ),
+    });
     const facts = await ex.extract("I am Mahadi Hasan.");
     expect(facts).toHaveLength(1);
+    expect(facts[0].entity).toBe("user");
     expect(facts[0].scope).toBe("user");
     expect(facts[0].key).toBe("user.name");
     expect(facts[0].memoryType).toBe(MemoryType.FACT);
@@ -291,28 +322,244 @@ describe("Groq Integration (mocked HTTP)", () => {
   });
 
   it("rejects invalid confidence and unknown types", async () => {
-    const ex = createGroqExtractor({ baseUrl: "https://api.groq.com/openai/v1", apiKey: "k", fetchImpl: mockFetch(JSON.stringify({
-      facts: [
-        { entity: "a", attribute: "b", value: "c", type: "identity", state: "current", scope: null, confidence: 2.5 },
-        { entity: "a", attribute: "b", value: "c", type: "alien_concept", state: "current", scope: null, confidence: 0.9 },
-      ],
-    })) });
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({ entity: "a", attribute: "b", value: "c", type: "identity", confidence: 2.5 }),
+            groqFact({ entity: "a", attribute: "b", value: "c", type: "alien_concept", confidence: 0.9 }),
+          ],
+        }),
+      ),
+    });
     const facts = await ex.extract("test input");
     expect(facts).toHaveLength(0);
   });
 
   it("local validation blocks 'I don't like MongoDB' from becoming current usage", async () => {
-    const res = await extractStructuredFactsHybrid("I don't like MongoDB anymore.", {
+    const message = "I don't like MongoDB anymore.";
+    const res = await extractStructuredFactsHybrid(message, {
       groqApiKey: "fake",
       groqBaseUrl: "https://api.groq.com/openai/v1",
-      fetchImpl: mockFetch(JSON.stringify({
-        facts: [
-          { entity: "user", attribute: "technology", value: "MongoDB", type: "usage", state: "current", scope: null, confidence: 0.99 },
-        ],
-      })),
+      forceGroq: true,
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              entity: "user",
+              attribute: "technology",
+              value: "MongoDB",
+              type: "usage",
+              state: "current",
+              scope: null,
+              confidence: 0.99,
+              rawText: message,
+            }),
+          ],
+        }),
+      ),
     });
-    const usage = res.facts.filter((f) => f.attribute === "technology" && f.state === "current");
+    const usage = res.facts.filter(
+      (f) =>
+        (f.attribute === "technology" || f.attribute === "usage") &&
+        f.state === "current",
+    );
     expect(usage).toHaveLength(0);
+  });
+
+  it("splits project stack usage into atomic scoped facts", async () => {
+    const message = "I use Cloudflare Workers with D1 and Redis for my project";
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              entity: "Mahadi",
+              attribute: "usage",
+              value: "Cloudflare Workers with D1 and Redis",
+              type: "usage",
+              state: "current",
+              scope: "user",
+              confidence: 0.95,
+              rawText: message,
+            }),
+          ],
+        }),
+      ),
+    });
+    const facts = await ex.extract(message);
+    expect(facts.length).toBeGreaterThanOrEqual(3);
+    expect(facts.every((f) => f.entity !== "Mahadi")).toBe(true);
+    expect(facts.every((f) => f.scope === "project")).toBe(true);
+    const values = facts.map((f) => f.value.toLowerCase());
+    expect(values.some((v) => v.includes("cloudflare") || v.includes("workers"))).toBe(true);
+    expect(values.some((v) => v.includes("d1"))).toBe(true);
+    expect(values.some((v) => v.includes("redis"))).toBe(true);
+  });
+
+  it("keeps preference comparisons in metadata, not value", async () => {
+    const message = "I prefer MUI over shadcn.";
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              attribute: "preference",
+              value: "MUI over shadcn",
+              type: "preference",
+              state: "current",
+              confidence: 0.95,
+              rawText: message,
+            }),
+          ],
+        }),
+      ),
+    });
+    const facts = await ex.extract(message);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].entity).toBe("user");
+    expect(facts[0].value.toLowerCase()).toBe("mui");
+    expect(facts[0].value.toLowerCase().includes("over")).toBe(false);
+    expect(facts[0].metadata?.over?.toLowerCase()).toContain("shadcn");
+  });
+
+  it("normalizes past/stopped/plan states and conditional metadata", async () => {
+    const message =
+      "I used MongoDB. I stopped using Firebase. I plan to use Neon. I might use Redis if latency is high.";
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              attribute: "usage",
+              value: "MongoDB",
+              type: "past_usage",
+              state: "past",
+              rawText: "I used MongoDB.",
+            }),
+            groqFact({
+              attribute: "usage",
+              value: "Firebase",
+              type: "stopped_usage",
+              state: "stopped",
+              rawText: "I stopped using Firebase.",
+            }),
+            groqFact({
+              attribute: "plan",
+              value: "Neon",
+              type: "plan",
+              state: "planned",
+              rawText: "I plan to use Neon.",
+            }),
+            groqFact({
+              attribute: "plan",
+              value: "Redis",
+              type: "possible_plan",
+              state: "conditional",
+              rawText: "I might use Redis if latency is high.",
+              metadata: {
+                over: null,
+                condition: "latency is high",
+                polarity: null,
+                reason: null,
+              },
+            }),
+            groqFact({
+              attribute: "condition",
+              value: "latency is high",
+              type: "fact",
+              state: "current",
+              rawText: "if latency is high",
+            }),
+          ],
+        }),
+      ),
+    });
+    const facts = await ex.extract(message);
+    expect(facts.find((f) => f.value === "MongoDB")?.state).toBe("past");
+    expect(facts.find((f) => f.value === "Firebase")?.state).toBe("stopped");
+    const plan = facts.find((f) => f.attribute === "plan" && f.value === "Neon");
+    expect(plan?.state).toBe("planned");
+    expect(plan?.memoryType).toBe(MemoryType.GOAL);
+    const conditional = facts.find((f) => f.value === "Redis");
+    expect(conditional?.attribute).toBe("plan");
+    expect(["conditional", "possible"]).toContain(conditional?.state);
+    expect(conditional?.metadata?.condition?.toLowerCase()).toContain("latency");
+    expect(facts.some((f) => f.attribute === "condition")).toBe(false);
+  });
+
+  it("collapses duplicate dislikes into one negative preference", async () => {
+    const message = "I don't like MongoDB. I avoid MongoDB. I hate MongoDB.";
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              attribute: "dislike",
+              value: "MongoDB",
+              type: "dislike",
+              rawText: "I don't like MongoDB.",
+              metadata: { over: null, condition: null, polarity: "negative", reason: null },
+            }),
+            groqFact({
+              attribute: "preference",
+              value: "MongoDB",
+              type: "dislike",
+              rawText: "I avoid MongoDB.",
+              metadata: { over: null, condition: null, polarity: "negative", reason: null },
+            }),
+            groqFact({
+              attribute: "dislike",
+              value: "MongoDB",
+              type: "dislike",
+              rawText: "I hate MongoDB.",
+              metadata: { over: null, condition: null, polarity: "negative", reason: null },
+            }),
+          ],
+        }),
+      ),
+    });
+    const facts = await ex.extract(message);
+    const neg = facts.filter(
+      (f) =>
+        f.value.toLowerCase() === "mongodb" &&
+        (f.metadata?.polarity === "negative" || f.attribute.startsWith("disliked_")),
+    );
+    expect(neg).toHaveLength(1);
+  });
+
+  it("does not treat temporary experimentation as permanent usage", async () => {
+    const message = "I'm testing Redis for a bit.";
+    const ex = createGroqExtractor({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "k",
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              attribute: "usage",
+              value: "Redis",
+              type: "usage",
+              state: "current",
+              rawText: message,
+            }),
+          ],
+        }),
+      ),
+    });
+    const facts = await ex.extract(message);
+    expect(facts.some((f) => f.attribute === "usage" && f.state === "current")).toBe(false);
+    expect(facts.some((f) => f.memoryType === MemoryType.TEMPORARY_STATE)).toBe(true);
   });
 
   it("falls back to local facts when Groq fails", async () => {
@@ -325,18 +572,35 @@ describe("Groq Integration (mocked HTTP)", () => {
     });
     expect(res.route).toBe("local");
     expect(res.facts.length).toBeGreaterThan(0);
+    expect(res.facts[0].metadata?.over?.toLowerCase()).toContain("ant");
   });
 
   it("merges and deduplicates local + Groq facts", async () => {
     const res = await extractStructuredFactsHybrid("I prefer Material UI over Ant Design and I use Neovim.", {
       groqApiKey: "fake",
       groqBaseUrl: "https://api.groq.com/openai/v1",
-      fetchImpl: mockFetch(JSON.stringify({
-        facts: [
-          { entity: "user", attribute: "preference", value: "Material UI over Ant Design", type: "preference", state: "current", scope: null, confidence: 0.9 },
-          { entity: "user", attribute: "editor", value: "Neovim", type: "usage", state: "current", scope: null, confidence: 0.9 },
-        ],
-      })),
+      fetchImpl: mockFetch(
+        JSON.stringify({
+          facts: [
+            groqFact({
+              attribute: "preference",
+              value: "Material UI over Ant Design",
+              type: "preference",
+              state: "current",
+              confidence: 0.9,
+              rawText: "I prefer Material UI over Ant Design",
+            }),
+            groqFact({
+              attribute: "editor",
+              value: "Neovim",
+              type: "usage",
+              state: "current",
+              confidence: 0.9,
+              rawText: "I use Neovim.",
+            }),
+          ],
+        }),
+      ),
     });
     const editorFacts = res.facts.filter((f) => f.value === "Neovim");
     expect(editorFacts).toHaveLength(1);
@@ -345,11 +609,11 @@ describe("Groq Integration (mocked HTTP)", () => {
   it("deduplicates facts via mergeFacts helper", () => {
     const fact = {
       entity: "user",
-      attribute: "technology",
+      attribute: "usage",
       value: "Neon",
       memoryType: MemoryType.FACT,
       rawText: "t",
-      key: "user.technology",
+      key: "user.usage.neon",
       scope: "user" as const,
       state: "current" as const,
       confidence: 0.9,
@@ -358,9 +622,13 @@ describe("Groq Integration (mocked HTTP)", () => {
     expect(merged).toHaveLength(1);
   });
 
-  it("exposes a strict schema", () => {
+  it("exposes a strict schema with rawText and metadata", () => {
     expect(GROQ_FACT_SCHEMA.additionalProperties).toBe(false);
-    const items = (GROQ_FACT_SCHEMA.properties.facts as { items: { additionalProperties: boolean } }).items;
+    const items = (GROQ_FACT_SCHEMA.properties.facts as {
+      items: { additionalProperties: boolean; required: string[] };
+    }).items;
     expect(items.additionalProperties).toBe(false);
+    expect(items.required).toContain("rawText");
+    expect(items.required).toContain("metadata");
   });
 });
