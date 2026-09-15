@@ -58,11 +58,11 @@ export async function processMemoryDelta(
     obsoleteMarked: 0,
   };
 
-  if (!delta.newMessages || delta.newMessages.length === 0) {
+  if (!delta.allMessages || delta.allMessages.length === 0) {
     return { ...base };
   }
 
-  const meaningful = delta.newMessages.filter(
+  const meaningful = delta.allMessages.filter(
     (m) => ["user", "assistant"].includes(m.role) && !isLowInfoMessage(m.content, m.role)
   );
 
@@ -74,15 +74,28 @@ export async function processMemoryDelta(
   }
 
   try {
+    // Extract from ALL messages — including duplicates already in the archive.
+    // A message may have been archived before its facts were extracted (bug,
+    // outage, older extractor). Re-extraction is safe: the store layer skips
+    // near-duplicate facts via information gain, so no rows are duplicated.
+    const reprocessingDuplicates = delta.duplicateMessages.length > 0;
+    if (reprocessingDuplicates) {
+      info("extract", "re-processing archived (duplicate) messages for extraction", {
+        userId: delta.userId,
+        duplicates: delta.duplicateMessages.length,
+      });
+    }
     const candidates: CandidateMemory[] = await extractCandidates(
-      delta.newMessages,
+      delta.allMessages,
       options?.groq ?? undefined
     );
-    const sourceIds = delta.newMessages.map((m) => m.messageKey);
+    const sourceIds = delta.allMessages.map((m) => m.messageKey);
 
-    info("extract", "candidates extracted from new messages", {
+    info("extract", "candidates extracted from messages", {
       userId: delta.userId,
+      messages: delta.allMessages.length,
       newMessages: delta.newMessages.length,
+      duplicates: delta.duplicateMessages.length,
       candidates: candidates.length,
     });
 
@@ -242,11 +255,11 @@ export async function processMemoryDeltaAsync(
     obsoleteMarked: 0,
   };
 
-  if (!delta.newMessages || delta.newMessages.length === 0) {
+  if (!delta.allMessages || delta.allMessages.length === 0) {
     return { ...base };
   }
 
-  const meaningful = delta.newMessages.filter(
+  const meaningful = delta.allMessages.filter(
     (m) => ["user", "assistant"].includes(m.role) && !isLowInfoMessage(m.content, m.role)
   );
 
@@ -262,7 +275,7 @@ export async function processMemoryDeltaAsync(
 
   if (memoryAi) {
     try {
-      const messagesText = delta.newMessages
+      const messagesText = delta.allMessages
         .filter((m) => m.content)
         .map((m) => `${m.role}: ${m.content}`)
         .join("\n");

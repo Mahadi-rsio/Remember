@@ -97,11 +97,23 @@ export class OpenAICompatibleProvider implements AIProvider {
         body: JSON.stringify(body),
       });
 
+      // A rejected stream request returns a plain JSON error body, not SSE.
+      // Capture it so the caller can log the provider's actual reason.
+      let errorBody: Uint8Array | undefined;
+      if (response.status >= 400) {
+        try {
+          errorBody = new Uint8Array(await response.arrayBuffer());
+        } catch {
+          errorBody = undefined;
+        }
+      }
+
       return {
         statusCode: response.status,
         headers: filterResponseHeaders(response.headers),
         mediaType: response.headers.get("content-type"),
         body: response.body,
+        errorBody,
       };
     } catch (err) {
       throw new UpstreamError(`upstream stream failed: ${err}`, err);

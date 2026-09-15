@@ -10,8 +10,23 @@ import { compileContext } from "../context/compiler";
 import { checkAuth, type AuthUser } from "./auth";
 import { checkRateLimit } from "./rate-limit";
 import type { ExtractionFallbackOptions } from "../memory/extractor";
+import { warn } from "../log";
 
 export const v1Router = new Hono<HonoContext>();
+
+function logUpstreamError(path: string, statusCode: number, content: Uint8Array | undefined) {
+  let body = "";
+  try {
+    body = content ? new TextDecoder().decode(content.slice(0, 1024)) : "";
+  } catch {
+    body = "<undecodable body>";
+  }
+  warn("upstream", "upstream returned an error", {
+    path,
+    status: statusCode,
+    body: body || "<empty body>",
+  });
+}
 
 function getGroqFallback(c: any): ExtractionFallbackOptions | null {
   const apiKey = c.env.GROQ_API_KEY;
@@ -166,6 +181,9 @@ v1Router.post("/chat/completions", async (c) => {
   if (upstreamBody.stream) {
     try {
       const streamResult = await provider.openStream("/chat/completions", upstreamBody);
+      if (streamResult.statusCode >= 400) {
+        logUpstreamError("/chat/completions", streamResult.statusCode, streamResult.errorBody);
+      }
       return new Response(streamResult.body, {
         status: streamResult.statusCode,
         headers: {
@@ -180,6 +198,9 @@ v1Router.post("/chat/completions", async (c) => {
 
   try {
     const result = await provider.chat(upstreamBody);
+    if (result.statusCode >= 400) {
+      logUpstreamError("/chat/completions", result.statusCode, result.content);
+    }
     return new Response(result.content, {
       status: result.statusCode,
       headers: {
@@ -236,6 +257,9 @@ v1Router.post("/responses", async (c) => {
   if (upstreamBody.stream) {
     try {
       const streamResult = await provider.openStream("/responses", upstreamBody);
+      if (streamResult.statusCode >= 400) {
+        logUpstreamError("/responses", streamResult.statusCode, streamResult.errorBody);
+      }
       return new Response(streamResult.body, {
         status: streamResult.statusCode,
         headers: {
@@ -250,6 +274,9 @@ v1Router.post("/responses", async (c) => {
 
   try {
     const result = await provider.responses(upstreamBody);
+    if (result.statusCode >= 400) {
+      logUpstreamError("/responses", result.statusCode, result.content);
+    }
     return new Response(result.content, {
       status: result.statusCode,
       headers: {

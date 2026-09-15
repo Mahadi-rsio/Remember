@@ -612,7 +612,7 @@ export async function extractCandidates(
     out.push(...(await extractFromMessage(msg, fallback)));
     const generated = out.slice(before);
     if (generated.length > 0) {
-      info("extract", "facts generated from message", {
+      info("extract", "message extracted", {
         role: msg.role,
         content: msg.content,
         count: generated.length,
@@ -624,6 +624,11 @@ export async function extractCandidates(
           value: c.structuredFact?.value ?? c.value ?? c.content,
           topicKey: c.topicKey ?? null,
         })),
+      });
+    } else {
+      debug("extract", "message NOT extracted (no facts)", {
+        role: msg.role,
+        content: msg.content,
       });
     }
   }

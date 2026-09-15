@@ -127,6 +127,22 @@ export async function compileContext(
           retrievedActive = Array.from(byId.values());
         }
 
+        // Always keep durable user identity/location/preference facts in reach
+        // so tense/paraphrased questions ("Where I lived", "my name", "what I
+        // prefer") recall correctly even when the query words don't lexically
+        // match the stored value ("Bangladesh" vs "lived").
+        const durableUser = await retrieveActiveMemories(db, userId, {
+          scope: "user",
+          limit: 40,
+        });
+        const byId = new Map(retrievedActive.map((i) => [i.id, i]));
+        for (const item of durableUser) {
+          if (item.type === "fact" || item.type === "preference" || item.type === "constraint") {
+            if (!byId.has(item.id)) byId.set(item.id, item);
+          }
+        }
+        retrievedActive = Array.from(byId.values());
+
         const wantsHistory =
           /\b(used to|previously|before|old|former|was|were|history|superseded|changed from)\b/i.test(
             latestUserText
@@ -166,6 +182,18 @@ export async function compileContext(
           expanded: expanded.length,
           canonicalAfterConflictResolve: canonicalItems.length,
           wantsHistory,
+        });
+        debug("retrieve", "retrieved facts", {
+          userId,
+          facts: retrievedActive.map((i) => ({
+            id: i.id,
+            attribute: i.predicate,
+            value: i.value,
+            scope: i.scope,
+            type: i.type,
+            status: i.status,
+            generatedBy: "local",
+          })),
         });
       } catch {}
     }

@@ -106,6 +106,7 @@ export async function persistCandidates(
       predicate: candidate.predicate,
       value: candidate.value,
       topicKey: candidate.topicKey,
+      generatedBy: candidate.structuredFact?.route ?? "local",
     };
     if (stored) {
       info("store", "fact written to PostgreSQL", {

@@ -13,7 +13,7 @@ const STOPWORDS: ReadonlySet<string> = new Set([
   "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not",
   "only", "own", "same", "so", "than", "too", "very", "s", "t", "can", "will", "just",
   "don", "should", "now", "i", "me", "my", "we", "our", "you", "your", "he", "she",
-  "it", "they", "them", "what", "which", "who", "whom", "this", "that", "these", "those",
+  "it", "they", "them", "what", "which", "who", "whom", "where", "this", "that", "these", "those",
   "am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "having",
   "do", "does", "did", "doing",
 ]);

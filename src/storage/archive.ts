@@ -119,7 +119,10 @@ export async function archiveRequest(
       await persistNewMessages(db, userId, delta.newMessages);
     }
 
-    if (delta.newMessages.length > 0) {
+    // Run extraction even when every message is a duplicate: the message may
+    // have been archived before its facts were extracted (older extractor,
+    // outage). Store-level dedup keeps re-extraction idempotent.
+    if (delta.allMessages.length > 0) {
       try {
         await processMemoryDelta(db, delta, {
           contextStore: options?.contextStore,
@@ -156,7 +159,10 @@ export async function archiveRequestAsync(
       await persistNewMessages(db, userId, delta.newMessages);
     }
 
-    if (delta.newMessages.length > 0) {
+    // Run extraction even when every message is a duplicate: the message may
+    // have been archived before its facts were extracted (older extractor,
+    // outage). Store-level dedup keeps re-extraction idempotent.
+    if (delta.allMessages.length > 0) {
       try {
         await processMemoryDeltaAsync(db, delta, {
           memoryAi: options?.memoryAi,
