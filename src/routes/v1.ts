@@ -9,8 +9,19 @@ import { archiveRequestAsync } from "../storage/archive";
 import { compileContext } from "../context/compiler";
 import { checkAuth, type AuthUser } from "./auth";
 import { checkRateLimit } from "./rate-limit";
+import type { ExtractionFallbackOptions } from "../memory/extractor";
 
 export const v1Router = new Hono<HonoContext>();
+
+function getGroqFallback(c: any): ExtractionFallbackOptions | null {
+  const apiKey = c.env.GROQ_API_KEY;
+  if (!apiKey) return null;
+  return {
+    groqApiKey: apiKey,
+    groqBaseUrl: c.env.GROQ_BASE_URL,
+    groqModel: c.env.GROQ_EXTRACTION_MODEL,
+  };
+}
 
 function getProvider(c: any): OpenAICompatibleProvider {
   const baseUrl = c.env.UPSTREAM_BASE_URL || "https://api.openai.com/v1";
@@ -140,6 +151,7 @@ v1Router.post("/chat/completions", async (c) => {
       apiKey: auth.apiKey,
       memoryAi,
       contextStore: createContextStoreFromRedis(getRedis(c.env)),
+      groq: getGroqFallback(c),
     }).catch(() => {});
     if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
       c.executionCtx.waitUntil(archiveTask);
@@ -209,6 +221,7 @@ v1Router.post("/responses", async (c) => {
       apiKey: auth.apiKey,
       memoryAi,
       contextStore: createContextStoreFromRedis(getRedis(c.env)),
+      groq: getGroqFallback(c),
     }).catch(() => {});
     if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
       c.executionCtx.waitUntil(archiveTask);

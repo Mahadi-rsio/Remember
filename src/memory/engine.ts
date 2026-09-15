@@ -6,6 +6,8 @@ import type { ShortTermContextStore } from "./context-store";
 import { extractCandidates } from "./extractor";
 import { isLowInfoMessage } from "./low-info";
 import { analyzeCandidates } from "./analyzer";
+import type { ExtractionFallbackOptions } from "./extractor";
+import { info, debug } from "../log";
 import { memoryAiOutputToCandidates } from "./compressor";
 import {
   latestContextVersion,
@@ -42,6 +44,8 @@ export async function processMemoryDelta(
     contextStore?: ShortTermContextStore | null;
     /** Optional Memory AI for cluster consolidation (falls back to deterministic). */
     memoryAi?: MemoryAIAdapter | null;
+    /** Optional Groq extraction fallback when local extraction yields nothing. */
+    groq?: ExtractionFallbackOptions | null;
   }
 ): Promise<MemoryUpdateResult | null> {
   const base = {
@@ -70,8 +74,17 @@ export async function processMemoryDelta(
   }
 
   try {
-    const candidates: CandidateMemory[] = extractCandidates(delta.newMessages);
+    const candidates: CandidateMemory[] = await extractCandidates(
+      delta.newMessages,
+      options?.groq ?? undefined
+    );
     const sourceIds = delta.newMessages.map((m) => m.messageKey);
+
+    info("extract", "candidates extracted from new messages", {
+      userId: delta.userId,
+      newMessages: delta.newMessages.length,
+      candidates: candidates.length,
+    });
 
     const memoryAiOutput = options?.memoryAiOutput;
     if (memoryAiOutput) {
@@ -88,9 +101,32 @@ export async function processMemoryDelta(
     // Memory Analyzer: route each candidate to store / context / discard.
     const { store, discard, contextEntries } = analyzeCandidates(candidates);
 
+    info("analyzer", "three-way classification complete", {
+      userId: delta.userId,
+      candidates: candidates.length,
+      store: store.length,
+      context: contextEntries.length,
+      discard: discard.length,
+    });
+    debug("analyzer", "routed candidates", {
+      userId: delta.userId,
+      stored: store.map((c) => c.content),
+      context: contextEntries.map((e) => `${e.key}=${e.value}`),
+      discarded: discard.map((c) => c.content),
+    });
+
     let results: ApplyResult[] = [];
     if (store.length > 0) {
       results = await persistCandidates(db, delta.userId, store);
+      info("store", "long-term candidates persisted to PostgreSQL", {
+        userId: delta.userId,
+        applied: results.length,
+        actions: results.map((r) => r.action),
+      });
+    } else {
+      info("store", "no durable candidates to persist", {
+        userId: delta.userId,
+      });
     }
 
     // Persist short-term context (Redis / in-memory store).
@@ -110,6 +146,11 @@ export async function processMemoryDelta(
           // fail-open: context persistence must never break the main path
         }
       }
+      info("context-store", "short-term context persisted", {
+        userId: delta.userId,
+        written: contextCount,
+        keys: contextEntries.map((e) => e.key),
+      });
     }
 
     let obsoleteCount = 0;
@@ -143,7 +184,7 @@ export async function processMemoryDelta(
       // fail-open
     }
 
-    return {
+    const result = {
       userId: delta.userId,
       candidates: candidates.length,
       stored: store.length,
@@ -155,6 +196,19 @@ export async function processMemoryDelta(
       consolidated,
       consolidationSuperseded,
     };
+
+    info("engine", "memory pipeline complete", {
+      userId: delta.userId,
+      candidates: result.candidates,
+      stored: result.stored,
+      contextCount: result.contextCount,
+      discarded: result.discarded,
+      consolidated: result.consolidated,
+      consolidationSuperseded: result.consolidationSuperseded,
+      contextVersion: result.contextVersion,
+    });
+
+    return result;
   } catch (err: any) {
     return {
       userId: delta.userId,
@@ -175,6 +229,7 @@ export async function processMemoryDeltaAsync(
   options?: {
     memoryAi?: MemoryAIAdapter | null;
     contextStore?: ShortTermContextStore | null;
+    groq?: ExtractionFallbackOptions | null;
   }
 ): Promise<MemoryUpdateResult | null> {
   const base = {
@@ -230,5 +285,6 @@ export async function processMemoryDeltaAsync(
     memoryAiOutput: aiOutput,
     contextStore: options?.contextStore,
     memoryAi: memoryAi ?? null,
+    groq: options?.groq ?? null,
   });
 }

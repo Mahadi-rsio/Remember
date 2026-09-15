@@ -18,6 +18,7 @@ import { retrieveActiveMemories, expandRelations } from "../memory/retrieve";
 import type { ShortTermContextStore } from "../memory/context-store";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 import { contextVersions } from "../db/schema/context";
+import { info, debug } from "../log";
 
 export interface CompileResult {
   messages: Array<Record<string, any>>;
@@ -158,6 +159,14 @@ export async function compileContext(
           );
           canonicalItems = [...activeResolved, ...histExtra];
         }
+        info("retrieve", "long-term memories retrieved", {
+          userId,
+          keywords: rankedKeywords.slice(0, 12),
+          retrieved: retrievedActive.length,
+          expanded: expanded.length,
+          canonicalAfterConflictResolve: canonicalItems.length,
+          wantsHistory,
+        });
       } catch {}
     }
 
@@ -172,6 +181,13 @@ export async function compileContext(
           const lines = ctx.map((e) => `• ${e.key}: ${e.value}`);
           shortTermText = `[Short-Term Context (current state)]\n${lines.join("\n")}`;
           shortTermItemsUsed = ctx.length;
+          info("retrieve", "short-term context retrieved", {
+            userId,
+            items: ctx.length,
+            keys: ctx.map((e) => e.key),
+          });
+        } else {
+          info("retrieve", "no short-term context found", { userId });
         }
       } catch {}
     }
@@ -248,6 +264,13 @@ export async function compileContext(
     }
 
     const selected = selectItemsForBudget(candidates, targetBudget);
+    info("compiler", "items selected within context budget", {
+      userId: userId ?? null,
+      candidates: candidates.length,
+      selected: selected.length,
+      canonicalSelected: selected.filter((s) => s.kind === "canonical_memory").length,
+      budget: targetBudget,
+    });
 
     // Prepend the short-term context block to the assembled system prompt.
     let compiledMessages = assembleContextMessages(selected, {
@@ -277,6 +300,18 @@ export async function compileContext(
       });
     }
 
+    info("compiler", "context compiled for upstream", {
+      userId: userId ?? null,
+      messagesIn: messages.length,
+      messagesOut: compiledMessages.length,
+      totalTokens: finalTokens,
+      canonicalItemsUsed: canonicalUsed,
+      shortTermItemsUsed,
+      selectedCount: selected.length,
+      budget: targetBudget,
+      contextVersion: versionNum,
+    });
+
     return {
       messages: compiledMessages,
       totalTokens: finalTokens,
@@ -287,6 +322,10 @@ export async function compileContext(
       budget: targetBudget,
     };
   } catch {
+    info("compiler", "context compilation failed; forwarding original messages", {
+      userId: userId ?? null,
+      messages: messages.length,
+    });
     return {
       messages,
       totalTokens: estimateMessagesTokens(messages),

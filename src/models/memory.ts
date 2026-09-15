@@ -104,6 +104,8 @@ export interface StructuredFact {
   state?: FactState;
   /** Local extraction confidence 0..1 (undefined → treat as implicit). */
   confidence?: number;
+  /** Which extractor produced this fact (local rule engine or Groq). */
+  route?: "local" | "groq";
   /** Optional metadata: comparison target ("over"), causal reason, etc. */
   metadata?: Record<string, string>;
 }

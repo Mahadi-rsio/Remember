@@ -5,6 +5,7 @@ import { messages as messagesTable, type Message } from "../db/schema/messages";
 import { detectDelta, type DeltaResult } from "../memory/delta";
 import { processMemoryDelta, processMemoryDeltaAsync } from "../memory/engine";
 import type { ShortTermContextStore } from "../memory/context-store";
+import type { ExtractionFallbackOptions } from "../memory/extractor";
 import type { NormalizedMessage } from "../memory/ids";
 import type { MemoryAIAdapter } from "../providers/memory-ai";
 
@@ -105,6 +106,7 @@ export async function archiveRequest(
     apiKey?: string | null;
     headers?: Headers | Record<string, string>;
     contextStore?: ShortTermContextStore | null;
+    groq?: ExtractionFallbackOptions | null;
   }
 ): Promise<DeltaResult | null> {
   try {
@@ -119,7 +121,10 @@ export async function archiveRequest(
 
     if (delta.newMessages.length > 0) {
       try {
-        await processMemoryDelta(db, delta, { contextStore: options?.contextStore });
+        await processMemoryDelta(db, delta, {
+          contextStore: options?.contextStore,
+          groq: options?.groq ?? null,
+        });
       } catch {}
     }
 
@@ -138,6 +143,7 @@ export async function archiveRequestAsync(
     headers?: Headers | Record<string, string>;
     memoryAi?: MemoryAIAdapter | null;
     contextStore?: ShortTermContextStore | null;
+    groq?: ExtractionFallbackOptions | null;
   }
 ): Promise<DeltaResult | null> {
   try {
@@ -155,6 +161,7 @@ export async function archiveRequestAsync(
         await processMemoryDeltaAsync(db, delta, {
           memoryAi: options?.memoryAi,
           contextStore: options?.contextStore,
+          groq: options?.groq ?? null,
         });
       } catch {}
     }

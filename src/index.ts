@@ -3,12 +3,17 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import type { HonoContext } from "./env";
+import { configureLogLevel } from "./log";
 import { healthRouter } from "./routes/health";
 import { v1Router } from "./routes/v1";
 
 const app = new Hono<HonoContext>();
 
 // Middleware
+app.use("*", async (c, next) => {
+  configureLogLevel(c.env.LOG_LEVEL);
+  await next();
+});
 app.use("*", logger());
 app.use("*", cors());
 app.use("*", prettyJSON());

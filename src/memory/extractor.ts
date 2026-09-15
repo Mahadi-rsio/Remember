@@ -8,10 +8,13 @@ import {
 import { type NormalizedMessage } from "./ids";
 import { isInterrogative } from "./interrogative";
 import { isLowInfoMessage } from "./low-info";
+import { info, debug } from "../log";
 import {
   detectPreferenceDomain,
   extractStructuredFacts,
   extractStructuredFact,
+  extractStructuredFactsHybrid,
+  shouldConsiderMemory,
   slugify,
   splitSentences,
   structuredFactToContent,
@@ -327,7 +330,7 @@ export function buildFactCandidate(
     topicKey,
     authority,
     isCorrection: looksLikeCorrection(message.content) || Boolean(sfact.isUpdate),
-    structuredFact: sfact,
+    structuredFact: { ...sfact, route: "local" },
   };
   candidate.scores = scoreCandidate(candidate);
   return candidate;
@@ -395,17 +398,38 @@ function detectSwitchUpdate(text: string): StructuredFact | null {
   return null;
 }
 
-export function extractFromMessage(message: NormalizedMessage): CandidateMemory[] {
+export interface ExtractionFallbackOptions {
+  /** When provided, enables Groq fallback when local extraction yields nothing. */
+  groqApiKey?: string;
+  groqBaseUrl?: string;
+  groqModel?: string;
+  /** Skip the Groq fallback even when a key is configured. */
+  forceLocal?: boolean;
+}
+
+export function extractFromMessageLocal(message: NormalizedMessage): CandidateMemory[] {
   if (message.role !== "user" && message.role !== "assistant") {
     return [];
   }
   if (isLowInfoMessage(message.content, message.role)) {
+    debug("extract", "skipped message: low-info", {
+      role: message.role,
+      content: message.content,
+    });
     return [];
   }
   if (isInterrogative(message.content)) {
+    debug("extract", "skipped message: interrogative", {
+      role: message.role,
+      content: message.content,
+    });
     return [];
   }
   if (looksSpeculative(message.content)) {
+    debug("extract", "skipped message: speculative", {
+      role: message.role,
+      content: message.content,
+    });
     return [];
   }
 
@@ -493,7 +517,7 @@ export function extractFromMessage(message: NormalizedMessage): CandidateMemory[
       topicKey,
       authority,
       isCorrection: hadPrefix || looksLikeCorrection(message.content),
-      structuredFact: sfact,
+      structuredFact: sfact ? { ...sfact, route: "local" } : null,
     };
     candidate.scores = scoreCandidate(candidate);
     return [candidate];
@@ -502,10 +526,106 @@ export function extractFromMessage(message: NormalizedMessage): CandidateMemory[
   return out;
 }
 
-export function extractCandidates(messages: NormalizedMessage[]): CandidateMemory[] {
+export async function extractFromMessage(
+  message: NormalizedMessage,
+  fallback?: ExtractionFallbackOptions
+): Promise<CandidateMemory[]> {
+  const local = extractFromMessageLocal(message);
+  if (local.length > 0 || !fallback || fallback.forceLocal || !fallback.groqApiKey) {
+    return local;
+  }
+
+  // Local extraction found nothing. Before paying for a Groq call, make sure the
+  // message isn't obviously non-memory (pure question / greeting / low-info).
+  // If the gate flags it as a clear skip, don't call Groq.
+  const gate = shouldConsiderMemory(message.content);
+  const clearSkipReasons = new Set([
+    "empty",
+    "pure_question",
+    "low_info",
+    "greeting_or_acknowledgement",
+    "general_knowledge_or_coding_request",
+  ]);
+  const isClearSkip =
+    gate.reasons.length > 0 && gate.reasons.every((r) => clearSkipReasons.has(r));
+  if (isClearSkip) {
+    return [];
+  }
+
+  // Complex/ambiguous message that local extraction couldn't handle → force Groq.
+  const groqBaseUrl =
+    fallback.groqBaseUrl ||
+    (typeof process !== "undefined" ? process.env.GROQ_BASE_URL : undefined) ||
+    "https://api.groq.com/openai/v1";
+  const hybrid = await extractStructuredFactsHybrid(message.content, {
+    groqBaseUrl,
+    groqApiKey: fallback.groqApiKey,
+    groqModel: fallback.groqModel,
+    forceGroq: true,
+  });
+
+  if (hybrid.facts.length === 0) {
+    info("extract", "local extraction empty; Groq fallback also returned no facts", {
+      role: message.role,
+      content: message.content,
+      route: hybrid.route,
+      confidence: hybrid.confidence,
+    });
+    return [];
+  }
+
+  info("extract", "local extraction empty; fell back to Groq", {
+    role: message.role,
+    content: message.content,
+    route: hybrid.route,
+    confidence: hybrid.confidence,
+    count: hybrid.facts.length,
+    facts: hybrid.facts.map((f) => ({
+      generatedBy: f.route ?? "groq",
+      type: f.memoryType,
+      subject: f.entity,
+      predicate: f.attribute,
+      value: f.value,
+      topicKey: structuredFactToTopicKey(f),
+    })),
+  });
+
+  const out: CandidateMemory[] = [];
+  const seenKeys = new Set<string>();
+  for (const sfact of hybrid.facts) {
+    const key = sfact.key || structuredFactToTopicKey(sfact);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const candidate = buildFactCandidate(message, sfact);
+    if (candidate) out.push(candidate);
+  }
+  return out;
+}
+
+export async function extractCandidates(
+  messages: NormalizedMessage[],
+  fallback?: ExtractionFallbackOptions
+): Promise<CandidateMemory[]> {
   const out: CandidateMemory[] = [];
   for (const msg of messages) {
-    out.push(...extractFromMessage(msg));
+    const before = out.length;
+    out.push(...(await extractFromMessage(msg, fallback)));
+    const generated = out.slice(before);
+    if (generated.length > 0) {
+      info("extract", "facts generated from message", {
+        role: msg.role,
+        content: msg.content,
+        count: generated.length,
+        facts: generated.map((c) => ({
+          type: c.type,
+          generatedBy: c.structuredFact?.route ?? "local",
+          subject: c.structuredFact?.entity ?? c.subject ?? null,
+          predicate: c.structuredFact?.attribute ?? c.predicate ?? null,
+          value: c.structuredFact?.value ?? c.value ?? c.content,
+          topicKey: c.topicKey ?? null,
+        })),
+      });
+    }
   }
   return out;
 }

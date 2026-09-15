@@ -2,6 +2,7 @@ import Groq from "groq-sdk";
 import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
 import { MemoryType, type StructuredFact, FactState } from "../models/memory";
 import { isInterrogative } from "./interrogative";
+import { info, warn, debug } from "../log";
 
 // ============================================================
 // 1. EXISTING EXPORTS — preserved exactly for backward compat
@@ -254,6 +255,30 @@ export function extractBuilding(text: string): StructuredFact | null {
 
 const USES_RE =
   /^\s*(?:the\s+)?(?<entity>[A-Za-z][\w\s/-]{0,30}?)\s+(?:uses|is\s+using|will\s+use)\s+(?<val>.+?)\s*[.!?]?$/i;
+
+const LOCATION_RE =
+  /^\s*(?:i\s+live|i\s+stay|i'm\s+based)\s+in\s+(?<val>.+?)\s*[.!?]?$/i;
+const FROM_LOCATION_RE =
+  /^\s*(?:i\s+am\s+from|i'm\s+from)\s+(?<val>.+?)\s*[.!?]?$/i;
+
+export function extractLocation(text: string): StructuredFact | null {
+  const cleaned = text.trim();
+  const m = cleaned.match(LOCATION_RE) || cleaned.match(FROM_LOCATION_RE);
+  if (!m || !m.groups?.val) return null;
+  const val = cleanVal(m.groups.val);
+  if (!val || INVALID_KEYS.has(val.toLowerCase())) return null;
+  return {
+    entity: "user",
+    attribute: "location",
+    value: val,
+    memoryType: MemoryType.FACT,
+    rawText: text,
+    key: "user.location",
+    scope: "user",
+    state: "current",
+    confidence: 1.0,
+  };
+}
 
 export function extractUses(text: string): StructuredFact | null {
   const m = text.match(USES_RE);
@@ -753,6 +778,8 @@ const IDENTITY_FACTS: ReadonlyArray<{
   attribute: string;
 }> = [
   { re: /^\s*(?:i\s+am|i'm|i'm\s+from|i'm\s+based\s+in)\s+(?<val>.+?)\s*[.!?]?$/i, attribute: "location" },
+  { re: /^\s*(?:i\s+live|i\s+stay|i'm\s+based)\s+in\s+(?<val>.+?)\s*[.!?]?$/i, attribute: "location" },
+  { re: /^\s*(?:i\s+am\s+from|i'm\s+from)\s+(?<val>.+?)\s*[.!?]?$/i, attribute: "location" },
   { re: /^\s*(?:i\s+am|i'm)\s+(?<val>.+?)\s+(?:years?\s+old|years old)\s*[.!?]?$/i, attribute: "age" },
 ];
 
@@ -1120,6 +1147,7 @@ export function shouldConsiderMemory(text: string): MemoryGateResult {
       "building", "creating", "developing", "working", "maintain", "learning",
       "own", "have", "has", "favorite", "preferred", "intend",
       "am", "name", "call", "testing", "trying", "switching", "migrating",
+      "live", "living", "reside", "residing", "based", "stay", "staying", "hail", "from",
     ].some((kw) => new RegExp(`\\b${kw}\\b`).test(normalized));
 
     if (!hasMemoryKeywords && candidateKinds.length === 0) {
@@ -1240,6 +1268,36 @@ export function extractIdentity(text: string): LocalExtractionResult | null {
         confidence: pattern.confidence,
         route: "local",
         reason: "identity_role",
+      };
+    }
+  }
+
+  // "I live in X" / "I'm from X" location identity facts
+  for (const pattern of IDENTITY_FACTS) {
+    const m = pattern.re.exec(cleaned);
+    if (m && m.groups?.val) {
+      let val = cleanVal(m.groups.val);
+      if (!val || INVALID_KEYS.has(val.toLowerCase())) continue;
+      const isAge = pattern.attribute === "age";
+      if (isAge) {
+        const ageMatch = m.groups.val.match(/\d+/);
+        val = ageMatch ? ageMatch[0] : val;
+      }
+      return {
+        fact: {
+          entity: "user",
+          attribute: pattern.attribute,
+          value: val,
+          memoryType: MemoryType.FACT,
+          rawText: text,
+          key: `user.${pattern.attribute}`,
+          scope: "user",
+          state: "current",
+          confidence: 1.0,
+        },
+        confidence: 1.0,
+        route: "local",
+        reason: isAge ? "identity_age" : "identity_location",
       };
     }
   }
@@ -2109,7 +2167,7 @@ ENTITY RULES
 - Pronouns like "it/this/that/the project" → the known project name or "project".
 
 CANONICAL ATTRIBUTES (ONLY these — never invent others)
-name | occupation | project | uses | database | preference | dislike | experiment | goal | plan
+name | occupation | location | project | uses | database | preference | dislike | experiment | goal | plan
 
 STATE / TYPE RULES
 - "I use X" → type "usage", attribute "uses", state "current"
@@ -2139,13 +2197,31 @@ Return only the required JSON object.`;
 
     const userPrompt = `Extract memory facts from this message:\n\n${text}`;
 
+    const startedAt = Date.now();
     try {
       const rawResponse = await this.postChat([
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ]);
-      return this.parseAndValidate(rawResponse, text);
-    } catch {
+      const elapsed = Date.now() - startedAt;
+      const facts = this.parseAndValidate(rawResponse, text);
+      info("groq", "connection OK", {
+        model: this.model,
+        baseUrl: this.client.baseURL,
+        ms: elapsed,
+        facts: facts.length,
+        source: text,
+      });
+      return facts;
+    } catch (err) {
+      const elapsed = Date.now() - startedAt;
+      warn("groq", "connection FAILED (falling back to local)", {
+        model: this.model,
+        baseUrl: this.client.baseURL,
+        ms: elapsed,
+        error: err instanceof Error ? err.message : String(err),
+        source: text,
+      });
       return [];
     }
   }
@@ -2197,6 +2273,7 @@ Return only the required JSON object.`;
           state: fstate,
           confidence,
           metadata,
+          route: "groq",
         });
       }
 
@@ -3092,6 +3169,9 @@ export async function extractStructuredFactsHybrid(
 
   if (!groqApiKey) {
     // No Groq key configured, return local facts
+    debug("groq", "connection SKIPPED: no GROQ_API_KEY configured", {
+      baseUrl: groqBaseUrl,
+    });
     return {
       route: "local",
       confidence: localFacts.length > 0 ? 0.7 : 0.3,
@@ -3134,6 +3214,7 @@ export function extractStructuredFact(text: string): StructuredFact | null {
 
   return (
     extractBuilding(cleaned) ||
+    extractLocation(cleaned) ||
     extractPossessive(cleaned) ||
     extractFavoriteIs(cleaned) ||
     extractPreference(cleaned) ||

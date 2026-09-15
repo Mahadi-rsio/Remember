@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "../db";
+import { info, debug } from "../log";
 import { messages as messagesTable } from "../db/schema/messages";
 import { type NormalizedMessage, normalizeMessages } from "./ids";
 
@@ -50,6 +51,16 @@ export async function detectDelta(
       newMessages.push(msg);
     }
   }
+
+  info("delta", "request compared against archive", {
+    userId,
+    total: normalized.length,
+    new: newMessages.length,
+    duplicates: duplicates.length,
+  });
+  debug("delta", "new message keys", {
+    keys: newMessages.map((m) => m.messageKey),
+  });
 
   return {
     userId,

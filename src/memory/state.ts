@@ -3,6 +3,7 @@ import type { Database } from "../db";
 import { memoryItems, type MemoryItem } from "../db/schema/memory";
 import { corrections } from "../db/schema/corrections";
 import { contextVersions } from "../db/schema/context";
+import { info, debug } from "../log";
 import {
   type CandidateMemory,
   MemoryStatus,
@@ -96,6 +97,46 @@ export async function persistCandidates(
     }
 
     results.push(result);
+
+    const storedActions = new Set(["create", "merge", "supersede"]);
+    const stored = storedActions.has(result.action);
+    const factDesc = {
+      type: candidate.type,
+      subject: candidate.subject,
+      predicate: candidate.predicate,
+      value: candidate.value,
+      topicKey: candidate.topicKey,
+    };
+    if (stored) {
+      info("store", "fact written to PostgreSQL", {
+        userId,
+        action: result.action,
+        reason: result.reason,
+        ...factDesc,
+        id: result.item?.id ?? null,
+        supersededId: result.superseded?.id ?? null,
+      });
+    } else if (result.action === "revoke") {
+      info("store", "fact revoked in PostgreSQL", {
+        userId,
+        reason: result.reason,
+        revoked: (result.revoked ?? []).map((i) => i.id),
+      });
+    } else {
+      info("store", "fact NOT stored", {
+        userId,
+        action: result.action,
+        reason: result.reason,
+        ...factDesc,
+      });
+    }
+    debug("store", "apply result detail", {
+      userId,
+      action: result.action,
+      reason: result.reason,
+      factDesc,
+      conflictItemId: result.conflictItemId ?? null,
+    });
 
     if (result.correction && result.action === "supersede" && result.item) {
       await db.insert(corrections).values({
